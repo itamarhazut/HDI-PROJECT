@@ -1,0 +1,4 @@
+# Minimal Supabase CLI config placeholder. Once a real Supabase project exists,
+# run `supabase link --project-ref <ref>` and this file will be filled in
+# automatically by the CLI. Kept here so `supabase/` is a valid project root.
+project_id = "electrician-erp"
