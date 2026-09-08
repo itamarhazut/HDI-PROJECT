@@ -14,5 +14,5 @@ const navItems: NavItem[] = [
 ];
 
 export function AdminLayout() {
-  return <AppShell title="ניהול העסק" navItems={navItems} />;
+  return <AppShell title="HDI Project" navItems={navItems} />;
 }

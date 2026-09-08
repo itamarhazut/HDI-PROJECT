@@ -10,5 +10,5 @@ const navItems: NavItem[] = [
 ];
 
 export function CustomerLayout() {
-  return <AppShell title="אזור אישי" navItems={navItems} />;
+  return <AppShell title="HDI Project" navItems={navItems} />;
 }
