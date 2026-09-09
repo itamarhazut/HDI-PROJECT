@@ -5,6 +5,18 @@
 //   supabase gen types typescript --project-id <ref> > packages/shared/src/types/database.ts
 // and re-export the generated `Database` type as before, so app code that
 // imports from "@repo/shared" doesn't need to change.
+//
+// IMPORTANT: every row/insert/update shape below is declared with `type X =
+// {...}` (an object type alias), never `interface X {...}`. supabase-js's
+// generic Database typing requires each table's Row/Insert/Update to
+// structurally satisfy `Record<string, unknown>`, and TypeScript only
+// infers that implicit index signature for object type *literals* — a
+// plain `interface` never gets one, even if every property is compatible.
+// With interfaces here, `SupabaseClient<Database>`'s Schema generic
+// silently collapsed to `never` for every `.from()` and `.rpc()` call
+// (caught via `FooInterface extends Record<string, unknown>` → false,
+// `FooTypeAlias extends Record<string, unknown>` → true, in a scratch
+// typecheck). Keep these as `type`, not `interface`.
 
 export type UserRole = "admin" | "customer" | "technician";
 export type JobStatus = "new" | "scheduled" | "in_progress" | "completed" | "cancelled";
@@ -14,7 +26,7 @@ export type DocumentStatus = "needed" | "in_progress" | "submitted" | "approved"
 export type LeadStatus = "new" | "contacted" | "converted" | "lost";
 export type InventoryReason = "job_usage" | "restock" | "adjustment";
 
-export interface Profile {
+export type Profile = {
   id: string;
   role: UserRole;
   full_name: string | null;
@@ -22,9 +34,9 @@ export interface Profile {
   email: string | null;
   created_at: string;
   updated_at: string;
-}
+};
 
-export interface Customer {
+export type Customer = {
   id: string;
   profile_id: string | null;
   name: string;
@@ -36,9 +48,9 @@ export interface Customer {
   created_at: string;
   updated_at: string;
   created_by: string | null;
-}
+};
 
-export interface Job {
+export type Job = {
   id: string;
   customer_id: string;
   quote_id: string | null;
@@ -53,9 +65,9 @@ export interface Job {
   created_at: string;
   updated_at: string;
   created_by: string | null;
-}
+};
 
-export interface InventoryItem {
+export type InventoryItem = {
   id: string;
   sku: string | null;
   name: string;
@@ -67,9 +79,9 @@ export interface InventoryItem {
   notes: string | null;
   created_at: string;
   updated_at: string;
-}
+};
 
-export interface InventoryTransaction {
+export type InventoryTransaction = {
   id: string;
   inventory_item_id: string;
   job_id: string | null;
@@ -77,9 +89,9 @@ export interface InventoryTransaction {
   reason: InventoryReason;
   created_at: string;
   created_by: string | null;
-}
+};
 
-export interface PriceListItem {
+export type PriceListItem = {
   id: string;
   code: string | null;
   name: string;
@@ -90,9 +102,9 @@ export interface PriceListItem {
   is_active: boolean;
   created_at: string;
   updated_at: string;
-}
+};
 
-export interface Quote {
+export type Quote = {
   id: string;
   quote_number: number;
   customer_id: string;
@@ -109,9 +121,9 @@ export interface Quote {
   created_at: string;
   updated_at: string;
   created_by: string | null;
-}
+};
 
-export interface QuoteLineItem {
+export type QuoteLineItem = {
   id: string;
   quote_id: string;
   price_list_item_id: string | null;
@@ -120,9 +132,9 @@ export interface QuoteLineItem {
   unit_price: number;
   line_total: number;
   sort_order: number;
-}
+};
 
-export interface Invoice {
+export type Invoice = {
   id: string;
   invoice_number: number;
   customer_id: string;
@@ -139,9 +151,9 @@ export interface Invoice {
   created_at: string;
   updated_at: string;
   created_by: string | null;
-}
+};
 
-export interface DocumentRecord {
+export type DocumentRecord = {
   id: string;
   customer_id: string | null;
   job_id: string | null;
@@ -155,9 +167,9 @@ export interface DocumentRecord {
   created_at: string;
   updated_at: string;
   created_by: string | null;
-}
+};
 
-export interface Lead {
+export type Lead = {
   id: string;
   name: string;
   phone: string | null;
@@ -169,12 +181,12 @@ export interface Lead {
   created_at: string;
   updated_at: string;
   created_by: string | null;
-}
+};
 
-export interface AppSetting {
+export type AppSetting = {
   key: string;
   value: unknown;
-}
+};
 
 // Minimal `Database` shape (subset of what supabase-js's generic typing
 // expects), enough to type the client without pulling in a full generated
@@ -184,7 +196,7 @@ export interface AppSetting {
 // `any` until real generated types replace this file).
 type Tbl<Row, Insert, Update> = { Row: Row; Insert: Insert; Update: Update; Relationships: [] };
 
-export interface Database {
+export type Database = {
   public: {
     Tables: {
       profiles: Tbl<Profile, Partial<Profile> & { id: string }, Partial<Profile>>;
@@ -225,4 +237,4 @@ export interface Database {
       };
     };
   };
-}
+};

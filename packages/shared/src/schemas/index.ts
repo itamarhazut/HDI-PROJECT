@@ -4,6 +4,12 @@ import { z } from "zod";
 // apps/mobile), plus future CSV-import validation. Kept deliberately
 // permissive on optional fields to make Excel/CSV import painless later.
 
+// A "select a related record, or leave empty" field. Plain HTML <select>
+// elements always submit a string, so an unset foreign-key picker submits
+// "" rather than null/undefined — the schema has to accept that alongside
+// a real uuid. Call sites normalize "" to null before writing to Postgres.
+const optionalUuid = z.string().uuid().optional().nullable().or(z.literal(""));
+
 export const customerSchema = z.object({
   name: z.string().min(2, "שם חייב להכיל לפחות 2 תווים"),
   phone: z.string().optional().nullable(),
@@ -37,7 +43,7 @@ export const priceListItemSchema = z.object({
 export type PriceListItemInput = z.infer<typeof priceListItemSchema>;
 
 export const quoteLineItemSchema = z.object({
-  price_list_item_id: z.string().uuid().optional().nullable(),
+  price_list_item_id: optionalUuid,
   description: z.string().min(1, "תיאור חובה"),
   quantity: z.coerce.number().min(0.01),
   unit_price: z.coerce.number().min(0),
@@ -46,7 +52,7 @@ export type QuoteLineItemInput = z.infer<typeof quoteLineItemSchema>;
 
 export const quoteSchema = z.object({
   customer_id: z.string().uuid("יש לבחור לקוח"),
-  job_id: z.string().uuid().optional().nullable(),
+  job_id: optionalUuid,
   valid_until: z.string().optional().nullable(),
   discount: z.coerce.number().min(0).default(0),
   notes: z.string().optional().nullable(),
@@ -56,19 +62,19 @@ export type QuoteInput = z.infer<typeof quoteSchema>;
 
 export const jobSchema = z.object({
   customer_id: z.string().uuid("יש לבחור לקוח"),
-  quote_id: z.string().uuid().optional().nullable(),
+  quote_id: optionalUuid,
   title: z.string().min(1, "כותרת חובה"),
   description: z.string().optional().nullable(),
   address: z.string().optional().nullable(),
   scheduled_date: z.string().optional().nullable(),
-  assigned_technician_id: z.string().uuid().optional().nullable(),
+  assigned_technician_id: optionalUuid,
 });
 export type JobInput = z.infer<typeof jobSchema>;
 
 export const invoiceSchema = z.object({
   customer_id: z.string().uuid("יש לבחור לקוח"),
-  job_id: z.string().uuid().optional().nullable(),
-  quote_id: z.string().uuid().optional().nullable(),
+  job_id: optionalUuid,
+  quote_id: optionalUuid,
   amount: z.coerce.number().min(0),
   issued_date: z.string().optional().nullable(),
   external_provider: z.string().optional().nullable(),
@@ -79,8 +85,8 @@ export const invoiceSchema = z.object({
 export type InvoiceInput = z.infer<typeof invoiceSchema>;
 
 export const documentSchema = z.object({
-  customer_id: z.string().uuid().optional().nullable(),
-  job_id: z.string().uuid().optional().nullable(),
+  customer_id: optionalUuid,
+  job_id: optionalUuid,
   type: z.string().default("other"),
   title: z.string().min(1, "כותרת חובה"),
   due_date: z.string().optional().nullable(),
