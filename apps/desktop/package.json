@@ -1,0 +1,40 @@
+{
+  "name": "@app/desktop",
+  "private": true,
+  "version": "0.1.0",
+  "description": "HDI Project — installed Windows desktop app (Electron shell around apps/web).",
+  "main": "main.js",
+  "scripts": {
+    "dev": "electron .",
+    "build:web": "pnpm --filter @app/web build",
+    "copy:web": "node scripts/copy-web-dist.js",
+    "prepackage": "pnpm run build:web && pnpm run copy:web",
+    "build:win": "pnpm run prepackage && electron-builder --win",
+    "build:win:dir": "pnpm run prepackage && electron-builder --win --dir"
+  },
+  "devDependencies": {
+    "electron": "^32.0.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.hdiproject.desktop",
+    "productName": "HDI Project",
+    "directories": {
+      "output": "release",
+      "buildResources": "resources"
+    },
+    "files": ["main.js", "web-dist/**/*"],
+    "win": {
+      "target": ["nsis"],
+      "icon": "resources/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "HDI Project"
+    }
+  }
+}

@@ -1,4 +1,4 @@
-import { createBrowserRouter, RouterProvider } from "react-router-dom";
+import { createHashRouter, RouterProvider } from "react-router-dom";
 import { RequireAuth } from "./auth/RequireAuth";
 import { AuthLayout } from "./layouts/AuthLayout";
 import { AdminLayout } from "./layouts/AdminLayout";
@@ -24,7 +24,13 @@ import { MyQuotesPage } from "./pages/customer/MyQuotesPage";
 import { MyInvoicesPage } from "./pages/customer/MyInvoicesPage";
 import { MyDocumentsPage } from "./pages/customer/MyDocumentsPage";
 
-const router = createBrowserRouter([
+// A hash router (URLs like /#/admin/customers instead of /admin/customers)
+// works identically whether this SPA is served from a normal web host, run
+// through `vite dev`, or loaded via file:// inside the Electron desktop
+// shell (apps/desktop) — a plain browser router needs server-side rewrite
+// rules that file:// has no equivalent of, so navigating past the first
+// page load would 404 inside the packaged desktop app.
+const router = createHashRouter([
   {
     path: "/",
     element: <RequireAuth />,

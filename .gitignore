@@ -13,6 +13,7 @@ coverage/
 .vscode/*
 !.vscode/extensions.json
 apps/desktop/release/
+apps/desktop/web-dist/
 apps/mobile/.expo/
 apps/mobile/dist/
 supabase/.branches/
