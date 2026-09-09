@@ -89,14 +89,10 @@ as $$
   );
 $$;
 
-create or replace function public.my_customer_id()
-returns uuid
-language sql
-stable
-security definer set search_path = public
-as $$
-  select id from public.customers where profile_id = auth.uid();
-$$;
+-- Note: my_customer_id() is defined further below, right after the
+-- `customers` table exists — a `language sql` function's body is validated
+-- against the schema at CREATE time, so it can't reference a table that
+-- doesn't exist yet.
 
 -- ----------------------------------------------------------------------------
 -- customers
@@ -124,6 +120,15 @@ create trigger customers_set_updated_at
 
 create index customers_phone_idx on public.customers (phone);
 create index customers_email_idx on public.customers (email);
+
+create or replace function public.my_customer_id()
+returns uuid
+language sql
+stable
+security definer set search_path = public
+as $$
+  select id from public.customers where profile_id = auth.uid();
+$$;
 
 -- RPC used right after a customer signs up: try to claim an existing
 -- admin-entered customer record by phone/email, otherwise create a new
