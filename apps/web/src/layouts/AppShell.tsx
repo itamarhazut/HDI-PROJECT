@@ -30,12 +30,26 @@ const ROLE_LABELS: Record<string, string> = {
   technician: "טכנאי/ת",
 };
 
+// One color per nav item, cycling — gives the sidebar some life instead of
+// one flat icon color repeated nine times.
+const NAV_BADGE_COLORS = [
+  "bg-indigo-500",
+  "bg-teal-500",
+  "bg-amber-500",
+  "bg-rose-500",
+  "bg-violet-500",
+  "bg-sky-500",
+  "bg-emerald-500",
+  "bg-orange-500",
+  "bg-fuchsia-500",
+];
+
 export function AppShell({ navItems }: AppShellProps) {
   const { profile, signOut } = useAuth();
 
   return (
     <div className="flex min-h-screen">
-      <aside className="flex w-64 shrink-0 flex-col bg-sidebar text-sidebar-foreground">
+      <aside className="flex w-64 shrink-0 flex-col bg-sidebar text-sidebar-foreground border-e border-sidebar-border">
         <div className="flex items-center gap-2.5 px-5 py-5">
           <Logo
             markClassName="h-9 w-9 shrink-0"
@@ -44,8 +58,9 @@ export function AppShell({ navItems }: AppShellProps) {
         </div>
 
         <nav className="flex flex-1 flex-col gap-1 px-3 py-2">
-          {navItems.map((item) => {
+          {navItems.map((item, i) => {
             const Icon = item.icon;
+            const badgeColor = NAV_BADGE_COLORS[i % NAV_BADGE_COLORS.length];
             return (
               <NavLink
                 key={item.to}
@@ -53,13 +68,15 @@ export function AppShell({ navItems }: AppShellProps) {
                 end={item.end}
                 className={({ isActive }) =>
                   cn(
-                    "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-sidebar-muted-foreground transition-colors",
-                    "hover:bg-white/5 hover:text-sidebar-foreground",
+                    "flex items-center gap-3 rounded-lg px-2.5 py-2 text-sm font-medium text-sidebar-muted-foreground transition-colors",
+                    "hover:bg-black/5 hover:text-sidebar-foreground",
                     isActive && "bg-sidebar-accent text-sidebar-accent-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
                   )
                 }
               >
-                <Icon className="h-[18px] w-[18px] shrink-0" />
+                <span className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-lg", badgeColor)}>
+                  <Icon className="h-[18px] w-[18px] text-white" />
+                </span>
                 <span>{item.label}</span>
               </NavLink>
             );
@@ -80,7 +97,7 @@ export function AppShell({ navItems }: AppShellProps) {
           </div>
           <button
             onClick={() => void signOut()}
-            className="mt-1 flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-sidebar-muted-foreground transition-colors hover:bg-white/5 hover:text-sidebar-foreground"
+            className="mt-1 flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-sidebar-muted-foreground transition-colors hover:bg-black/5 hover:text-sidebar-foreground"
           >
             <IconLogout className="h-[18px] w-[18px] shrink-0" />
             <span>{strings.nav.logout}</span>

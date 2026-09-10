@@ -1,4 +1,5 @@
 import * as React from "react";
+import { Link } from "react-router-dom";
 import { useFieldArray, useForm, type Control, type FieldErrors, type UseFormRegister } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -244,6 +245,11 @@ export function QuotesPage() {
                         <Button variant="outline" size="sm" onClick={() => setEditingId(q.id)}>
                           {strings.common.edit}
                         </Button>
+                        <Link to={`/admin/quotes/${q.id}/print`} target="_blank" rel="noreferrer">
+                          <Button variant="outline" size="sm">
+                            PDF / הדפסה
+                          </Button>
+                        </Link>
                         {q.status === "accepted" && (
                           <Button variant="secondary" size="sm" onClick={() => convertToJob.mutate(q)}>
                             הפוך לעבודה

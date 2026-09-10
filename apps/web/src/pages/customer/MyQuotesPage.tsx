@@ -1,4 +1,5 @@
 import * as React from "react";
+import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { QUOTE_STATUS_LABELS, strings } from "@repo/shared";
 import { Button, Card, CardContent, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@repo/ui";
@@ -65,9 +66,16 @@ export function MyQuotesPage() {
                       <TableCell>{formatCurrency(q.total)}</TableCell>
                       <TableCell>{formatDate(q.valid_until)}</TableCell>
                       <TableCell>
-                        <Button variant="outline" size="sm" onClick={() => setExpanded((c) => (c === q.id ? null : q.id))}>
-                          {expanded === q.id ? "סגירה" : "פירוט"}
-                        </Button>
+                        <div className="flex flex-wrap gap-2">
+                          <Button variant="outline" size="sm" onClick={() => setExpanded((c) => (c === q.id ? null : q.id))}>
+                            {expanded === q.id ? "סגירה" : "פירוט"}
+                          </Button>
+                          <Link to={`/portal/quotes/${q.id}/print`} target="_blank" rel="noreferrer">
+                            <Button variant="outline" size="sm">
+                              PDF / הדפסה
+                            </Button>
+                          </Link>
+                        </div>
                       </TableCell>
                     </TableRow>
                     {expanded === q.id && (

@@ -7,6 +7,7 @@ import { SignInPage } from "./pages/auth/SignInPage";
 import { SignUpPage } from "./pages/auth/SignUpPage";
 import { RoleRedirect } from "./pages/RoleRedirect";
 import { NotFoundPage } from "./pages/NotFoundPage";
+import { QuotePrintPage } from "./pages/QuotePrintPage";
 
 import { AdminDashboardPage } from "./pages/admin/DashboardPage";
 import { CustomersPage } from "./pages/admin/CustomersPage";
@@ -54,17 +55,25 @@ const router = createHashRouter([
               { path: "leads", element: <LeadsPage /> },
             ],
           },
+          // Outside AdminLayout on purpose — a print/PDF view has no
+          // sidebar chrome, just the document itself.
+          { path: "quotes/:id/print", element: <QuotePrintPage /> },
         ],
       },
       {
         path: "portal",
-        element: <CustomerLayout />,
         children: [
-          { index: true, element: <CustomerDashboardPage /> },
-          { path: "jobs", element: <MyJobsPage /> },
-          { path: "quotes", element: <MyQuotesPage /> },
-          { path: "invoices", element: <MyInvoicesPage /> },
-          { path: "documents", element: <MyDocumentsPage /> },
+          {
+            element: <CustomerLayout />,
+            children: [
+              { index: true, element: <CustomerDashboardPage /> },
+              { path: "jobs", element: <MyJobsPage /> },
+              { path: "quotes", element: <MyQuotesPage /> },
+              { path: "invoices", element: <MyInvoicesPage /> },
+              { path: "documents", element: <MyDocumentsPage /> },
+            ],
+          },
+          { path: "quotes/:id/print", element: <QuotePrintPage /> },
         ],
       },
     ],

@@ -4,48 +4,36 @@
 
 @layer base {
   :root {
-    /* Light content-area palette. Deliberately a hair off pure white — a
-       true #fff background next to white cards reads flat; a faint cool
-       tint gives cards something to sit on. */
-    --background: 210 20% 98%;
-    --foreground: 222 47% 11%;
+    --background: 240 20% 98%;
+    --foreground: 224 39% 14%;
     --card: 0 0% 100%;
-    --card-foreground: 222 47% 11%;
+    --card-foreground: 224 39% 14%;
 
-    /* Primary brand blue — matches the app icon's navy family, but a
-       lighter/more saturated step so buttons read as actionable rather
-       than heavy. */
-    --primary: 221 83% 53%;
+    --primary: 243 72% 58%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 210 25% 94%;
-    --secondary-foreground: 222 47% 15%;
-    --muted: 210 25% 95%;
-    --muted-foreground: 215 16% 42%;
+    --secondary: 240 20% 95%;
+    --secondary-foreground: 224 30% 20%;
+    --muted: 240 20% 96%;
+    --muted-foreground: 225 10% 45%;
 
-    /* Amber accent — the bolt color from the app icon. Used sparingly
-       (hover backgrounds, small highlights) as a warm counterpoint to the
-       blue/navy that dominates everything else. */
-    --accent: 45 93% 58%;
-    --accent-foreground: 222 47% 11%;
+    --accent: 38 92% 56%;
+    --accent-foreground: 224 39% 14%;
 
     --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 214 20% 88%;
-    --input: 214 20% 88%;
-    --ring: 221 83% 53%;
-    --radius: 0.625rem;
+    --border: 240 15% 90%;
+    --input: 240 15% 90%;
+    --ring: 243 72% 58%;
+    --radius: 0.875rem;
 
-    /* Sidebar gets its own dark palette, independent of the light content
-       area — a two-tone dark-sidebar/light-content layout is what makes
-       this read as a real dashboard product rather than a form on a page. */
-    --sidebar-background: 224 39% 14%;
-    --sidebar-foreground: 210 20% 92%;
-    --sidebar-muted-foreground: 217 15% 65%;
-    --sidebar-accent: 221 83% 58%;
-    --sidebar-accent-foreground: 0 0% 100%;
-    --sidebar-border: 224 30% 22%;
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 224 39% 14%;
+    --sidebar-muted-foreground: 225 10% 45%;
+    --sidebar-accent: 243 70% 95%;
+    --sidebar-accent-foreground: 243 72% 45%;
+    --sidebar-border: 240 15% 91%;
   }
 
   * {
@@ -57,4 +45,8 @@
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
   }
+}
+
+.shadow-sm {
+  box-shadow: 0 2px 10px -2px rgb(0 0 0 / 0.08), 0 1px 3px -1px rgb(0 0 0 / 0.05);
 }
