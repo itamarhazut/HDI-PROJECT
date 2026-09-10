@@ -2,9 +2,10 @@ import * as React from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { QUOTE_STATUS_LABELS, strings } from "@repo/shared";
-import { Button, Card, CardContent, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@repo/ui";
+import { Button, Card, CardContent, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableSkeleton } from "@repo/ui";
 import { StatusBadge } from "../../components/StatusBadge";
 import { PageHeader } from "../../components/PageHeader";
+import { IconFileText } from "../../components/icons";
 import { formatCurrency, formatDate } from "../../lib/format";
 import { supabase } from "../../lib/supabase";
 
@@ -37,11 +38,11 @@ export function MyQuotesPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader title={strings.nav.myQuotes} description="הצעות המחיר שקיבלת — לחצ/י על שורה לפירוט." />
+      <PageHeader title={strings.nav.myQuotes} description="הצעות המחיר שקיבלת — לחצ/י על שורה לפירוט." icon={IconFileText} color="bg-amber-500" />
       <Card>
         <CardContent className="p-4">
           {isLoading ? (
-            <p className="text-muted-foreground">{strings.common.loading}</p>
+            <TableSkeleton columns={5} />
           ) : (quotes ?? []).length === 0 ? (
             <p className="text-muted-foreground">{strings.common.noResults}</p>
           ) : (

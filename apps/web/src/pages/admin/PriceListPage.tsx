@@ -15,14 +15,20 @@ import {
   TableHead,
   TableHeader,
   TableRow,
+  TableSkeleton,
+  useConfirmDialog,
+  useToast,
 } from "@repo/ui";
 import { FormField } from "../../components/FormField";
 import { PageHeader } from "../../components/PageHeader";
+import { IconTag } from "../../components/icons";
 import { formatCurrency } from "../../lib/format";
 import { supabase } from "../../lib/supabase";
 
 export function PriceListPage() {
   const queryClient = useQueryClient();
+  const toast = useToast();
+  const confirmDialog = useConfirmDialog();
   const [editing, setEditing] = React.useState<PriceListItem | "new" | null>(null);
   const [search, setSearch] = React.useState("");
 
@@ -58,7 +64,9 @@ export function PriceListPage() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["price_list_items"] });
       setEditing(null);
+      toast({ title: "הפריט נשמר בהצלחה", variant: "success" });
     },
+    onError: (err) => toast({ title: "שמירת הפריט נכשלה", description: err instanceof Error ? err.message : undefined, variant: "error" }),
   });
 
   const remove = useMutation({
@@ -66,7 +74,11 @@ export function PriceListPage() {
       const { error } = await supabase.from("price_list_items").delete().eq("id", id);
       if (error) throw error;
     },
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["price_list_items"] }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["price_list_items"] });
+      toast({ title: "הפריט נמחק", variant: "success" });
+    },
+    onError: (err) => toast({ title: "מחיקת הפריט נכשלה", description: err instanceof Error ? err.message : undefined, variant: "error" }),
   });
 
   const filtered = (items ?? []).filter((i) => {
@@ -80,6 +92,8 @@ export function PriceListPage() {
       <PageHeader
         title={strings.nav.priceList}
         description="מחירון הציוד והשירותים — משמש לבניית הצעות מחיר."
+        icon={IconTag}
+        color="bg-violet-500"
         action={<Button onClick={() => setEditing((c) => (c === "new" ? null : "new"))}>+ פריט חדש</Button>}
       />
 
@@ -103,7 +117,7 @@ export function PriceListPage() {
             className="max-w-sm"
           />
           {isLoading ? (
-            <p className="text-muted-foreground">{strings.common.loading}</p>
+            <TableSkeleton columns={7} />
           ) : filtered.length === 0 ? (
             <p className="text-muted-foreground">{strings.common.noResults}</p>
           ) : (
@@ -138,8 +152,14 @@ export function PriceListPage() {
                         <Button
                           variant="destructive"
                           size="sm"
-                          onClick={() => {
-                            if (confirm(`למחוק את הפריט "${i.name}"?`)) remove.mutate(i.id);
+                          onClick={async () => {
+                            const ok = await confirmDialog({
+                              title: "מחיקת פריט מחירון",
+                              description: `למחוק את הפריט "${i.name}"? הפעולה אינה הפיכה.`,
+                              confirmLabel: "מחק",
+                              variant: "destructive",
+                            });
+                            if (ok) remove.mutate(i.id);
                           }}
                         >
                           {strings.common.delete}

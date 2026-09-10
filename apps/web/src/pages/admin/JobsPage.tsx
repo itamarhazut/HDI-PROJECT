@@ -17,16 +17,22 @@ import {
   TableHead,
   TableHeader,
   TableRow,
+  TableSkeleton,
   Textarea,
+  useConfirmDialog,
+  useToast,
 } from "@repo/ui";
 import { FormField } from "../../components/FormField";
 import { PageHeader } from "../../components/PageHeader";
 import { StatusBadge } from "../../components/StatusBadge";
+import { IconClipboardCheck } from "../../components/icons";
 import { formatDate } from "../../lib/format";
 import { supabase } from "../../lib/supabase";
 
 export function JobsPage() {
   const queryClient = useQueryClient();
+  const toast = useToast();
+  const confirmDialog = useConfirmDialog();
   const [editing, setEditing] = React.useState<Job | "new" | null>(null);
 
   const { data: jobs, isLoading } = useQuery({
@@ -77,7 +83,9 @@ export function JobsPage() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["jobs"] });
       setEditing(null);
+      toast({ title: "העבודה נשמרה בהצלחה", variant: "success" });
     },
+    onError: (err) => toast({ title: "שמירת העבודה נכשלה", description: err instanceof Error ? err.message : undefined, variant: "error" }),
   });
 
   const remove = useMutation({
@@ -85,7 +93,11 @@ export function JobsPage() {
       const { error } = await supabase.from("jobs").delete().eq("id", id);
       if (error) throw error;
     },
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["jobs"] }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["jobs"] });
+      toast({ title: "העבודה נמחקה", variant: "success" });
+    },
+    onError: (err) => toast({ title: "מחיקת העבודה נכשלה", description: err instanceof Error ? err.message : undefined, variant: "error" }),
   });
 
   return (
@@ -93,6 +105,8 @@ export function JobsPage() {
       <PageHeader
         title={strings.nav.jobs}
         description="עבודות פתוחות, מתוזמנות וסגורות."
+        icon={IconClipboardCheck}
+        color="bg-amber-500"
         action={<Button onClick={() => setEditing((c) => (c === "new" ? null : "new"))}>+ עבודה חדשה</Button>}
       />
 
@@ -111,7 +125,7 @@ export function JobsPage() {
       <Card>
         <CardContent className="p-4">
           {isLoading ? (
-            <p className="text-muted-foreground">{strings.common.loading}</p>
+            <TableSkeleton columns={5} />
           ) : (jobs ?? []).length === 0 ? (
             <p className="text-muted-foreground">{strings.common.noResults}</p>
           ) : (
@@ -142,8 +156,14 @@ export function JobsPage() {
                         <Button
                           variant="destructive"
                           size="sm"
-                          onClick={() => {
-                            if (confirm(`למחוק את העבודה "${j.title}"?`)) remove.mutate(j.id);
+                          onClick={async () => {
+                            const ok = await confirmDialog({
+                              title: "מחיקת עבודה",
+                              description: `למחוק את העבודה "${j.title}"? הפעולה אינה הפיכה.`,
+                              confirmLabel: "מחק",
+                              variant: "destructive",
+                            });
+                            if (ok) remove.mutate(j.id);
                           }}
                         >
                           {strings.common.delete}

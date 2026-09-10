@@ -5,7 +5,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@repo/ui";
 import { QUOTE_STATUS_LABELS, type QuoteStatus } from "@repo/shared";
 import { formatCurrency } from "../../lib/format";
 import { supabase } from "../../lib/supabase";
-import { IconBox, IconClipboardCheck, IconFileText, IconReceipt, IconUsers } from "../../components/icons";
+import { PageHeader } from "../../components/PageHeader";
+import { IconBox, IconClipboardCheck, IconDashboard, IconFileText, IconReceipt, IconUsers } from "../../components/icons";
 
 function IconBadge({ color, icon: Icon }: { color: string; icon: ComponentType<SVGProps<SVGSVGElement>> }) {
   return (
@@ -112,10 +113,7 @@ export function AdminDashboardPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-bold">לוח בקרה</h1>
-        <p className="text-sm text-muted-foreground">סיכום כללי של מצב העסק.</p>
-      </div>
+      <PageHeader title="לוח בקרה" description="סיכום כללי של מצב העסק." icon={IconDashboard} color="bg-indigo-500" />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {cards.map((card) => (

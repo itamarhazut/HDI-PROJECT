@@ -1,9 +1,10 @@
 import * as React from "react";
 import { useQuery } from "@tanstack/react-query";
 import { DOCUMENT_STATUS_LABELS, strings } from "@repo/shared";
-import { Card, CardContent, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@repo/ui";
+import { Card, CardContent, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableSkeleton } from "@repo/ui";
 import { PageHeader } from "../../components/PageHeader";
 import { StatusBadge } from "../../components/StatusBadge";
+import { IconFolder } from "../../components/icons";
 import { formatDate } from "../../lib/format";
 import { supabase } from "../../lib/supabase";
 
@@ -33,7 +34,7 @@ export function MyDocumentsPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader title={strings.nav.myDocuments} description="מסמכים ואישורים שהעסק שיתף איתך." />
+      <PageHeader title={strings.nav.myDocuments} description="מסמכים ואישורים שהעסק שיתף איתך." icon={IconFolder} color="bg-violet-500" />
       {downloadError && (
         <div className="flex items-center justify-between rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
           <span>{downloadError}</span>
@@ -45,7 +46,7 @@ export function MyDocumentsPage() {
       <Card>
         <CardContent className="p-4">
           {isLoading ? (
-            <p className="text-muted-foreground">{strings.common.loading}</p>
+            <TableSkeleton columns={4} />
           ) : (documents ?? []).length === 0 ? (
             <p className="text-muted-foreground">{strings.common.noResults}</p>
           ) : (

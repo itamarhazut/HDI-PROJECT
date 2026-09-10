@@ -15,14 +15,20 @@ import {
   TableHead,
   TableHeader,
   TableRow,
+  TableSkeleton,
   Textarea,
+  useConfirmDialog,
+  useToast,
 } from "@repo/ui";
 import { FormField } from "../../components/FormField";
 import { PageHeader } from "../../components/PageHeader";
+import { IconUsers } from "../../components/icons";
 import { supabase } from "../../lib/supabase";
 
 export function CustomersPage() {
   const queryClient = useQueryClient();
+  const toast = useToast();
+  const confirmDialog = useConfirmDialog();
   const [editing, setEditing] = React.useState<Customer | "new" | null>(null);
   const [search, setSearch] = React.useState("");
 
@@ -56,7 +62,9 @@ export function CustomersPage() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["customers"] });
       setEditing(null);
+      toast({ title: "הלקוח נשמר בהצלחה", variant: "success" });
     },
+    onError: (err) => toast({ title: "שמירת הלקוח נכשלה", description: err instanceof Error ? err.message : undefined, variant: "error" }),
   });
 
   const remove = useMutation({
@@ -64,7 +72,11 @@ export function CustomersPage() {
       const { error } = await supabase.from("customers").delete().eq("id", id);
       if (error) throw error;
     },
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["customers"] }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["customers"] });
+      toast({ title: "הלקוח נמחק", variant: "success" });
+    },
+    onError: (err) => toast({ title: "מחיקת הלקוח נכשלה", description: err instanceof Error ? err.message : undefined, variant: "error" }),
   });
 
   const filtered = (customers ?? []).filter((c) => {
@@ -78,6 +90,8 @@ export function CustomersPage() {
       <PageHeader
         title={strings.nav.customers}
         description="רשימת הלקוחות של העסק — חיפוש, יצירה ועריכה."
+        icon={IconUsers}
+        color="bg-teal-500"
         action={
           <Button
             onClick={() => setEditing((current) => (current === "new" ? null : "new"))}
@@ -107,7 +121,7 @@ export function CustomersPage() {
             className="max-w-sm"
           />
           {isLoading ? (
-            <p className="text-muted-foreground">{strings.common.loading}</p>
+            <TableSkeleton columns={6} />
           ) : filtered.length === 0 ? (
             <p className="text-muted-foreground">{strings.common.noResults}</p>
           ) : (
@@ -144,8 +158,14 @@ export function CustomersPage() {
                         <Button
                           variant="destructive"
                           size="sm"
-                          onClick={() => {
-                            if (confirm(`למחוק את הלקוח "${c.name}"?`)) remove.mutate(c.id);
+                          onClick={async () => {
+                            const ok = await confirmDialog({
+                              title: "מחיקת לקוח",
+                              description: `למחוק את הלקוח "${c.name}"? הפעולה אינה הפיכה.`,
+                              confirmLabel: "מחק",
+                              variant: "destructive",
+                            });
+                            if (ok) remove.mutate(c.id);
                           }}
                         >
                           {strings.common.delete}

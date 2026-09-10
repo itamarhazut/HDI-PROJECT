@@ -1,8 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { JOB_STATUS_LABELS, strings } from "@repo/shared";
-import { Card, CardContent, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@repo/ui";
+import { Card, CardContent, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableSkeleton } from "@repo/ui";
 import { PageHeader } from "../../components/PageHeader";
 import { StatusBadge } from "../../components/StatusBadge";
+import { IconClipboardCheck } from "../../components/icons";
 import { formatDate } from "../../lib/format";
 import { supabase } from "../../lib/supabase";
 
@@ -19,11 +20,11 @@ export function MyJobsPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader title={strings.nav.myJobs} description="התקדמות העבודות שביצענו עבורך." />
+      <PageHeader title={strings.nav.myJobs} description="התקדמות העבודות שביצענו עבורך." icon={IconClipboardCheck} color="bg-teal-500" />
       <Card>
         <CardContent className="p-4">
           {isLoading ? (
-            <p className="text-muted-foreground">{strings.common.loading}</p>
+            <TableSkeleton columns={4} />
           ) : (jobs ?? []).length === 0 ? (
             <p className="text-muted-foreground">{strings.common.noResults}</p>
           ) : (

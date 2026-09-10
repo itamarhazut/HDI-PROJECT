@@ -26,11 +26,15 @@ import {
   TableHead,
   TableHeader,
   TableRow,
+  TableSkeleton,
   Textarea,
+  useConfirmDialog,
+  useToast,
 } from "@repo/ui";
 import { FormField } from "../../components/FormField";
 import { PageHeader } from "../../components/PageHeader";
 import { StatusBadge } from "../../components/StatusBadge";
+import { IconFileText } from "../../components/icons";
 import { formatCurrency, formatDate } from "../../lib/format";
 import { supabase } from "../../lib/supabase";
 
@@ -41,6 +45,8 @@ type QuoteFormInput = z.infer<typeof quoteFormSchema>;
 
 export function QuotesPage() {
   const queryClient = useQueryClient();
+  const toast = useToast();
+  const confirmDialog = useConfirmDialog();
   const [editingId, setEditingId] = React.useState<string | "new" | null>(null);
 
   const { data: quotes, isLoading } = useQuery({
@@ -157,7 +163,9 @@ export function QuotesPage() {
       void queryClient.invalidateQueries({ queryKey: ["quotes"] });
       void queryClient.invalidateQueries({ queryKey: ["quote_line_items"] });
       setEditingId(null);
+      toast({ title: "הצעת המחיר נשמרה בהצלחה", variant: "success" });
     },
+    onError: (err) => toast({ title: "שמירת הצעת המחיר נכשלה", description: err instanceof Error ? err.message : undefined, variant: "error" }),
   });
 
   const remove = useMutation({
@@ -165,7 +173,11 @@ export function QuotesPage() {
       const { error } = await supabase.from("quotes").delete().eq("id", id);
       if (error) throw error;
     },
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["quotes"] }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["quotes"] });
+      toast({ title: "הצעת המחיר נמחקה", variant: "success" });
+    },
+    onError: (err) => toast({ title: "מחיקת הצעת המחיר נכשלה", description: err instanceof Error ? err.message : undefined, variant: "error" }),
   });
 
   const convertToJob = useMutation({
@@ -178,7 +190,11 @@ export function QuotesPage() {
       });
       if (error) throw error;
     },
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["jobs"] }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["jobs"] });
+      toast({ title: "נוצרה עבודה חדשה מהצעת המחיר", variant: "success" });
+    },
+    onError: (err) => toast({ title: "יצירת העבודה נכשלה", description: err instanceof Error ? err.message : undefined, variant: "error" }),
   });
 
   const editingQuote = editingId && editingId !== "new" ? (quotes ?? []).find((q) => q.id === editingId) ?? null : null;
@@ -189,6 +205,8 @@ export function QuotesPage() {
       <PageHeader
         title={strings.nav.quotes}
         description="בניית הצעות מחיר מהמחירון, מעקב סטטוס והפיכה לעבודה."
+        icon={IconFileText}
+        color="bg-sky-500"
         action={<Button onClick={() => setEditingId((c) => (c === "new" ? null : "new"))}>+ הצעה חדשה</Button>}
       />
 
@@ -215,7 +233,7 @@ export function QuotesPage() {
       <Card>
         <CardContent className="p-4">
           {isLoading ? (
-            <p className="text-muted-foreground">{strings.common.loading}</p>
+            <TableSkeleton columns={6} />
           ) : (quotes ?? []).length === 0 ? (
             <p className="text-muted-foreground">{strings.common.noResults}</p>
           ) : (
@@ -258,8 +276,14 @@ export function QuotesPage() {
                         <Button
                           variant="destructive"
                           size="sm"
-                          onClick={() => {
-                            if (confirm(`למחוק את הצעת המחיר #${q.quote_number}?`)) remove.mutate(q.id);
+                          onClick={async () => {
+                            const ok = await confirmDialog({
+                              title: "מחיקת הצעת מחיר",
+                              description: `למחוק את הצעת המחיר #${q.quote_number}? הפעולה אינה הפיכה.`,
+                              confirmLabel: "מחק",
+                              variant: "destructive",
+                            });
+                            if (ok) remove.mutate(q.id);
                           }}
                         >
                           {strings.common.delete}

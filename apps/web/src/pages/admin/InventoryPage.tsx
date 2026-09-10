@@ -24,10 +24,14 @@ import {
   TableHead,
   TableHeader,
   TableRow,
+  TableSkeleton,
   Textarea,
+  useConfirmDialog,
+  useToast,
 } from "@repo/ui";
 import { FormField } from "../../components/FormField";
 import { PageHeader } from "../../components/PageHeader";
+import { IconBox } from "../../components/icons";
 import { supabase } from "../../lib/supabase";
 
 const REASON_LABELS: Record<InventoryReason, string> = {
@@ -38,6 +42,8 @@ const REASON_LABELS: Record<InventoryReason, string> = {
 
 export function InventoryPage() {
   const queryClient = useQueryClient();
+  const toast = useToast();
+  const confirmDialog = useConfirmDialog();
   const [editing, setEditing] = React.useState<InventoryItem | "new" | null>(null);
   const [adjusting, setAdjusting] = React.useState<InventoryItem | null>(null);
   const [search, setSearch] = React.useState("");
@@ -85,7 +91,9 @@ export function InventoryPage() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["inventory_items"] });
       setEditing(null);
+      toast({ title: "הפריט נשמר בהצלחה", variant: "success" });
     },
+    onError: (err) => toast({ title: "שמירת הפריט נכשלה", description: err instanceof Error ? err.message : undefined, variant: "error" }),
   });
 
   const remove = useMutation({
@@ -93,7 +101,11 @@ export function InventoryPage() {
       const { error } = await supabase.from("inventory_items").delete().eq("id", id);
       if (error) throw error;
     },
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["inventory_items"] }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["inventory_items"] });
+      toast({ title: "הפריט נמחק", variant: "success" });
+    },
+    onError: (err) => toast({ title: "מחיקת הפריט נכשלה", description: err instanceof Error ? err.message : undefined, variant: "error" }),
   });
 
   const adjust = useMutation({
@@ -108,7 +120,9 @@ export function InventoryPage() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["inventory_items"] });
       setAdjusting(null);
+      toast({ title: "המלאי עודכן בהצלחה", variant: "success" });
     },
+    onError: (err) => toast({ title: "עדכון המלאי נכשל", description: err instanceof Error ? err.message : undefined, variant: "error" }),
   });
 
   const filtered = (items ?? []).filter((i) => {
@@ -122,6 +136,8 @@ export function InventoryPage() {
       <PageHeader
         title={strings.nav.inventory}
         description="מלאי ציוד וחומרים — כמות במלאי מתעדכנת רק דרך פעולת 'התאמת מלאי'."
+        icon={IconBox}
+        color="bg-rose-500"
         action={<Button onClick={() => setEditing((c) => (c === "new" ? null : "new"))}>+ פריט חדש</Button>}
       />
 
@@ -155,7 +171,7 @@ export function InventoryPage() {
             className="max-w-sm"
           />
           {isLoading ? (
-            <p className="text-muted-foreground">{strings.common.loading}</p>
+            <TableSkeleton columns={5} />
           ) : filtered.length === 0 ? (
             <p className="text-muted-foreground">{strings.common.noResults}</p>
           ) : (
@@ -196,8 +212,14 @@ export function InventoryPage() {
                           <Button
                             variant="destructive"
                             size="sm"
-                            onClick={() => {
-                              if (confirm(`למחוק את הפריט "${i.name}"?`)) remove.mutate(i.id);
+                            onClick={async () => {
+                              const ok = await confirmDialog({
+                                title: "מחיקת פריט מלאי",
+                                description: `למחוק את הפריט "${i.name}"? הפעולה אינה הפיכה.`,
+                                confirmLabel: "מחק",
+                                variant: "destructive",
+                              });
+                              if (ok) remove.mutate(i.id);
                             }}
                           >
                             {strings.common.delete}

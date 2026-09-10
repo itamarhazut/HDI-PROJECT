@@ -24,11 +24,15 @@ import {
   TableHead,
   TableHeader,
   TableRow,
+  TableSkeleton,
   Textarea,
+  useConfirmDialog,
+  useToast,
 } from "@repo/ui";
 import { FormField } from "../../components/FormField";
 import { PageHeader } from "../../components/PageHeader";
 import { StatusBadge } from "../../components/StatusBadge";
+import { IconReceipt } from "../../components/icons";
 import { formatCurrency, formatDate } from "../../lib/format";
 import { supabase } from "../../lib/supabase";
 
@@ -39,6 +43,8 @@ type InvoiceFormInput = z.infer<typeof invoiceFormSchema>;
 
 export function InvoicesPage() {
   const queryClient = useQueryClient();
+  const toast = useToast();
+  const confirmDialog = useConfirmDialog();
   const [editing, setEditing] = React.useState<Invoice | "new" | null>(null);
 
   const { data: invoices, isLoading } = useQuery({
@@ -109,7 +115,9 @@ export function InvoicesPage() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["invoices"] });
       setEditing(null);
+      toast({ title: "החשבונית נשמרה בהצלחה", variant: "success" });
     },
+    onError: (err) => toast({ title: "שמירת החשבונית נכשלה", description: err instanceof Error ? err.message : undefined, variant: "error" }),
   });
 
   const remove = useMutation({
@@ -117,7 +125,11 @@ export function InvoicesPage() {
       const { error } = await supabase.from("invoices").delete().eq("id", id);
       if (error) throw error;
     },
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["invoices"] }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["invoices"] });
+      toast({ title: "החשבונית נמחקה", variant: "success" });
+    },
+    onError: (err) => toast({ title: "מחיקת החשבונית נכשלה", description: err instanceof Error ? err.message : undefined, variant: "error" }),
   });
 
   return (
@@ -125,6 +137,8 @@ export function InvoicesPage() {
       <PageHeader
         title={strings.nav.invoices}
         description={'מעקב פנימי אחר חשבוניות. הפקת חשבונית מס רשמית נעשית עדיין דרך "יש חשבונית" בחוץ — כאן שומרים קישור וסטטוס.'}
+        icon={IconReceipt}
+        color="bg-emerald-500"
         action={<Button onClick={() => setEditing((c) => (c === "new" ? null : "new"))}>+ חשבונית חדשה</Button>}
       />
 
@@ -145,7 +159,7 @@ export function InvoicesPage() {
       <Card>
         <CardContent className="p-4">
           {isLoading ? (
-            <p className="text-muted-foreground">{strings.common.loading}</p>
+            <TableSkeleton columns={7} />
           ) : (invoices ?? []).length === 0 ? (
             <p className="text-muted-foreground">{strings.common.noResults}</p>
           ) : (
@@ -193,8 +207,14 @@ export function InvoicesPage() {
                         <Button
                           variant="destructive"
                           size="sm"
-                          onClick={() => {
-                            if (confirm(`למחוק את חשבונית #${inv.invoice_number}?`)) remove.mutate(inv.id);
+                          onClick={async () => {
+                            const ok = await confirmDialog({
+                              title: "מחיקת חשבונית",
+                              description: `למחוק את חשבונית #${inv.invoice_number}? הפעולה אינה הפיכה.`,
+                              confirmLabel: "מחק",
+                              variant: "destructive",
+                            });
+                            if (ok) remove.mutate(inv.id);
                           }}
                         >
                           {strings.common.delete}

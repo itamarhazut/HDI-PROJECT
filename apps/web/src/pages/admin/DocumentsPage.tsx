@@ -23,11 +23,15 @@ import {
   TableHead,
   TableHeader,
   TableRow,
+  TableSkeleton,
   Textarea,
+  useConfirmDialog,
+  useToast,
 } from "@repo/ui";
 import { FormField } from "../../components/FormField";
 import { PageHeader } from "../../components/PageHeader";
 import { StatusBadge } from "../../components/StatusBadge";
+import { IconFolder } from "../../components/icons";
 import { formatDate } from "../../lib/format";
 import { supabase } from "../../lib/supabase";
 
@@ -46,6 +50,8 @@ const DOCUMENT_TYPE_OPTIONS = [
 
 export function DocumentsPage() {
   const queryClient = useQueryClient();
+  const toast = useToast();
+  const confirmDialog = useConfirmDialog();
   const [editing, setEditing] = React.useState<DocumentRecord | "new" | null>(null);
   const [downloadError, setDownloadError] = React.useState<string | null>(null);
 
@@ -117,7 +123,9 @@ export function DocumentsPage() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["documents"] });
       setEditing(null);
+      toast({ title: "המסמך נשמר בהצלחה", variant: "success" });
     },
+    onError: (err) => toast({ title: "שמירת המסמך נכשלה", description: err instanceof Error ? err.message : undefined, variant: "error" }),
   });
 
   const remove = useMutation({
@@ -128,7 +136,11 @@ export function DocumentsPage() {
       const { error } = await supabase.from("documents").delete().eq("id", doc.id);
       if (error) throw error;
     },
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["documents"] }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["documents"] });
+      toast({ title: "המסמך נמחק", variant: "success" });
+    },
+    onError: (err) => toast({ title: "מחיקת המסמך נכשלה", description: err instanceof Error ? err.message : undefined, variant: "error" }),
   });
 
   const download = async (path: string) => {
@@ -146,6 +158,8 @@ export function DocumentsPage() {
       <PageHeader
         title={strings.nav.documents}
         description="מסמכי בירוקרטיה ותאימות — אישורים, תעודות, היתרים. ניתן לצרף קובץ ולסמן נראות ללקוח."
+        icon={IconFolder}
+        color="bg-orange-500"
         action={<Button onClick={() => setEditing((c) => (c === "new" ? null : "new"))}>+ מסמך חדש</Button>}
       />
 
@@ -181,7 +195,7 @@ export function DocumentsPage() {
       <Card>
         <CardContent className="p-4">
           {isLoading ? (
-            <p className="text-muted-foreground">{strings.common.loading}</p>
+            <TableSkeleton columns={7} />
           ) : (documents ?? []).length === 0 ? (
             <p className="text-muted-foreground">{strings.common.noResults}</p>
           ) : (
@@ -224,8 +238,14 @@ export function DocumentsPage() {
                         <Button
                           variant="destructive"
                           size="sm"
-                          onClick={() => {
-                            if (confirm(`למחוק את המסמך "${doc.title}"?`)) remove.mutate(doc);
+                          onClick={async () => {
+                            const ok = await confirmDialog({
+                              title: "מחיקת מסמך",
+                              description: `למחוק את המסמך "${doc.title}"? הפעולה אינה הפיכה.`,
+                              confirmLabel: "מחק",
+                              variant: "destructive",
+                            });
+                            if (ok) remove.mutate(doc);
                           }}
                         >
                           {strings.common.delete}

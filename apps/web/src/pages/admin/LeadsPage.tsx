@@ -16,11 +16,15 @@ import {
   TableHead,
   TableHeader,
   TableRow,
+  TableSkeleton,
   Textarea,
+  useConfirmDialog,
+  useToast,
 } from "@repo/ui";
 import { FormField } from "../../components/FormField";
 import { PageHeader } from "../../components/PageHeader";
 import { StatusBadge } from "../../components/StatusBadge";
+import { IconMegaphone } from "../../components/icons";
 import { supabase } from "../../lib/supabase";
 
 const leadFormSchema = leadSchema.extend({
@@ -30,6 +34,8 @@ type LeadFormInput = z.infer<typeof leadFormSchema>;
 
 export function LeadsPage() {
   const queryClient = useQueryClient();
+  const toast = useToast();
+  const confirmDialog = useConfirmDialog();
   const [editing, setEditing] = React.useState<Lead | "new" | null>(null);
 
   const { data: leads, isLoading } = useQuery({
@@ -63,7 +69,9 @@ export function LeadsPage() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["leads"] });
       setEditing(null);
+      toast({ title: "הליד נשמר בהצלחה", variant: "success" });
     },
+    onError: (err) => toast({ title: "שמירת הליד נכשלה", description: err instanceof Error ? err.message : undefined, variant: "error" }),
   });
 
   const remove = useMutation({
@@ -71,7 +79,11 @@ export function LeadsPage() {
       const { error } = await supabase.from("leads").delete().eq("id", id);
       if (error) throw error;
     },
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["leads"] }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["leads"] });
+      toast({ title: "הליד נמחק", variant: "success" });
+    },
+    onError: (err) => toast({ title: "מחיקת הליד נכשלה", description: err instanceof Error ? err.message : undefined, variant: "error" }),
   });
 
   const convert = useMutation({
@@ -92,7 +104,9 @@ export function LeadsPage() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["leads"] });
       void queryClient.invalidateQueries({ queryKey: ["customers"] });
+      toast({ title: "הליד הומר ללקוח בהצלחה", variant: "success" });
     },
+    onError: (err) => toast({ title: "המרת הליד ללקוח נכשלה", description: err instanceof Error ? err.message : undefined, variant: "error" }),
   });
 
   return (
@@ -100,6 +114,8 @@ export function LeadsPage() {
       <PageHeader
         title={strings.nav.leads}
         description="לידים משיווק — מעקב עד המרה ללקוח."
+        icon={IconMegaphone}
+        color="bg-fuchsia-500"
         action={<Button onClick={() => setEditing((c) => (c === "new" ? null : "new"))}>+ ליד חדש</Button>}
       />
 
@@ -117,7 +133,7 @@ export function LeadsPage() {
       <Card>
         <CardContent className="p-4">
           {isLoading ? (
-            <p className="text-muted-foreground">{strings.common.loading}</p>
+            <TableSkeleton columns={5} />
           ) : (leads ?? []).length === 0 ? (
             <p className="text-muted-foreground">{strings.common.noResults}</p>
           ) : (
@@ -149,8 +165,13 @@ export function LeadsPage() {
                           <Button
                             variant="secondary"
                             size="sm"
-                            onClick={() => {
-                              if (confirm(`להמיר את "${lead.name}" ללקוח?`)) convert.mutate(lead);
+                            onClick={async () => {
+                              const ok = await confirmDialog({
+                                title: "המרת ליד ללקוח",
+                                description: `להמיר את "${lead.name}" ללקוח?`,
+                                confirmLabel: "המרה",
+                              });
+                              if (ok) convert.mutate(lead);
                             }}
                           >
                             המרה ללקוח
@@ -159,8 +180,14 @@ export function LeadsPage() {
                         <Button
                           variant="destructive"
                           size="sm"
-                          onClick={() => {
-                            if (confirm(`למחוק את הליד "${lead.name}"?`)) remove.mutate(lead.id);
+                          onClick={async () => {
+                            const ok = await confirmDialog({
+                              title: "מחיקת ליד",
+                              description: `למחוק את הליד "${lead.name}"? הפעולה אינה הפיכה.`,
+                              confirmLabel: "מחק",
+                              variant: "destructive",
+                            });
+                            if (ok) remove.mutate(lead.id);
                           }}
                         >
                           {strings.common.delete}
