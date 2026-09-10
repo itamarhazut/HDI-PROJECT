@@ -1,3 +1,4 @@
+import * as React from "react";
 import { useQuery } from "@tanstack/react-query";
 import { DOCUMENT_STATUS_LABELS, strings } from "@repo/shared";
 import { Card, CardContent, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@repo/ui";
@@ -7,6 +8,8 @@ import { formatDate } from "../../lib/format";
 import { supabase } from "../../lib/supabase";
 
 export function MyDocumentsPage() {
+  const [downloadError, setDownloadError] = React.useState<string | null>(null);
+
   // RLS (documents_select_own_visible) scopes this to the logged-in
   // customer's own documents that were explicitly marked visible.
   const { data: documents, isLoading } = useQuery({
@@ -19,9 +22,10 @@ export function MyDocumentsPage() {
   });
 
   const download = async (path: string) => {
+    setDownloadError(null);
     const { data, error } = await supabase.storage.from("documents").createSignedUrl(path, 60);
     if (error || !data) {
-      alert("שגיאה בפתיחת הקובץ: " + (error?.message ?? "לא נמצא"));
+      setDownloadError("שגיאה בפתיחת הקובץ: " + (error?.message ?? "לא נמצא"));
       return;
     }
     window.open(data.signedUrl, "_blank");
@@ -30,6 +34,14 @@ export function MyDocumentsPage() {
   return (
     <div className="flex flex-col gap-6">
       <PageHeader title={strings.nav.myDocuments} description="מסמכים ואישורים שהעסק שיתף איתך." />
+      {downloadError && (
+        <div className="flex items-center justify-between rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          <span>{downloadError}</span>
+          <button onClick={() => setDownloadError(null)} className="font-medium underline">
+            סגירה
+          </button>
+        </div>
+      )}
       <Card>
         <CardContent className="p-4">
           {isLoading ? (

@@ -4,24 +4,48 @@
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
+    /* Light content-area palette. Deliberately a hair off pure white — a
+       true #fff background next to white cards reads flat; a faint cool
+       tint gives cards something to sit on. */
+    --background: 210 20% 98%;
     --foreground: 222 47% 11%;
     --card: 0 0% 100%;
     --card-foreground: 222 47% 11%;
-    --primary: 217 91% 60%;
+
+    /* Primary brand blue — matches the app icon's navy family, but a
+       lighter/more saturated step so buttons read as actionable rather
+       than heavy. */
+    --primary: 221 83% 53%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 210 40% 96%;
-    --secondary-foreground: 222 47% 11%;
-    --muted: 210 40% 96%;
-    --muted-foreground: 215 16% 47%;
-    --accent: 210 40% 94%;
+
+    --secondary: 210 25% 94%;
+    --secondary-foreground: 222 47% 15%;
+    --muted: 210 25% 95%;
+    --muted-foreground: 215 16% 42%;
+
+    /* Amber accent — the bolt color from the app icon. Used sparingly
+       (hover backgrounds, small highlights) as a warm counterpoint to the
+       blue/navy that dominates everything else. */
+    --accent: 45 93% 58%;
     --accent-foreground: 222 47% 11%;
-    --destructive: 0 84% 60%;
+
+    --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 100%;
-    --border: 214 32% 91%;
-    --input: 214 32% 91%;
-    --ring: 217 91% 60%;
-    --radius: 0.5rem;
+
+    --border: 214 20% 88%;
+    --input: 214 20% 88%;
+    --ring: 221 83% 53%;
+    --radius: 0.625rem;
+
+    /* Sidebar gets its own dark palette, independent of the light content
+       area — a two-tone dark-sidebar/light-content layout is what makes
+       this read as a real dashboard product rather than a form on a page. */
+    --sidebar-background: 224 39% 14%;
+    --sidebar-foreground: 210 20% 92%;
+    --sidebar-muted-foreground: 217 15% 65%;
+    --sidebar-accent: 221 83% 58%;
+    --sidebar-accent-foreground: 0 0% 100%;
+    --sidebar-border: 224 30% 22%;
   }
 
   * {
@@ -30,5 +54,7 @@
 
   body {
     @apply bg-background text-foreground font-sans;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
   }
 }

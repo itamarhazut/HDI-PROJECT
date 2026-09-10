@@ -3,10 +3,14 @@ import { NavLink, Outlet } from "react-router-dom";
 import { cn } from "@repo/ui";
 import { strings } from "@repo/shared";
 import { useAuth } from "../auth/AuthProvider";
+import { Logo } from "../components/Logo";
+import { IconLogout } from "../components/icons";
 
 export interface NavItem {
   to: string;
   label: string;
+  icon: React.ComponentType<React.SVGProps<SVGSVGElement>>;
+  end?: boolean;
 }
 
 interface AppShellProps {
@@ -14,41 +18,79 @@ interface AppShellProps {
   navItems: NavItem[];
 }
 
-export function AppShell({ title, navItems }: AppShellProps) {
+function initials(name: string | null | undefined) {
+  if (!name) return "?";
+  const parts = name.trim().split(/\s+/).slice(0, 2);
+  return parts.map((p) => p[0]).join("").toUpperCase();
+}
+
+const ROLE_LABELS: Record<string, string> = {
+  admin: "מנהל/ת מערכת",
+  customer: "לקוח/ה",
+  technician: "טכנאי/ת",
+};
+
+export function AppShell({ navItems }: AppShellProps) {
   const { profile, signOut } = useAuth();
 
   return (
     <div className="flex min-h-screen">
-      <aside className="flex w-64 shrink-0 flex-col border-e bg-secondary/40 p-4">
-        <div className="mb-6 px-2">
-          <p className="text-lg font-bold">{title}</p>
-          {profile?.full_name && <p className="text-sm text-muted-foreground">{profile.full_name}</p>}
+      <aside className="flex w-64 shrink-0 flex-col bg-sidebar text-sidebar-foreground">
+        <div className="flex items-center gap-2.5 px-5 py-5">
+          <Logo
+            markClassName="h-9 w-9 shrink-0"
+            wordmarkClassName="text-base font-bold tracking-tight text-sidebar-foreground"
+          />
         </div>
-        <nav className="flex flex-1 flex-col gap-1">
-          {navItems.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              className={({ isActive }) =>
-                cn(
-                  "rounded-md px-3 py-2 text-sm font-medium hover:bg-accent",
-                  isActive && "bg-primary text-primary-foreground hover:bg-primary"
-                )
-              }
-            >
-              {item.label}
-            </NavLink>
-          ))}
+
+        <nav className="flex flex-1 flex-col gap-1 px-3 py-2">
+          {navItems.map((item) => {
+            const Icon = item.icon;
+            return (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                end={item.end}
+                className={({ isActive }) =>
+                  cn(
+                    "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-sidebar-muted-foreground transition-colors",
+                    "hover:bg-white/5 hover:text-sidebar-foreground",
+                    isActive && "bg-sidebar-accent text-sidebar-accent-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                  )
+                }
+              >
+                <Icon className="h-[18px] w-[18px] shrink-0" />
+                <span>{item.label}</span>
+              </NavLink>
+            );
+          })}
         </nav>
-        <button
-          onClick={() => void signOut()}
-          className="mt-4 rounded-md px-3 py-2 text-start text-sm font-medium text-muted-foreground hover:bg-accent"
-        >
-          {strings.nav.logout}
-        </button>
+
+        <div className="border-t border-sidebar-border p-3">
+          <div className="flex items-center gap-3 rounded-lg px-2 py-2">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent text-sm font-semibold text-accent-foreground">
+              {initials(profile?.full_name)}
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-medium text-sidebar-foreground">{profile?.full_name ?? "—"}</p>
+              <p className="truncate text-xs text-sidebar-muted-foreground">
+                {profile?.role ? ROLE_LABELS[profile.role] ?? profile.role : ""}
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => void signOut()}
+            className="mt-1 flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-sidebar-muted-foreground transition-colors hover:bg-white/5 hover:text-sidebar-foreground"
+          >
+            <IconLogout className="h-[18px] w-[18px] shrink-0" />
+            <span>{strings.nav.logout}</span>
+          </button>
+        </div>
       </aside>
-      <main className="flex-1 overflow-auto p-6">
-        <Outlet />
+      <main className="flex-1 overflow-auto p-6 lg:p-8">
+        <div className="mx-auto max-w-6xl">
+          <Outlet />
+        </div>
       </main>
     </div>
   );

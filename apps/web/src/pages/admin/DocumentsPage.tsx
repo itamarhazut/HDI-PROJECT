@@ -47,6 +47,7 @@ const DOCUMENT_TYPE_OPTIONS = [
 export function DocumentsPage() {
   const queryClient = useQueryClient();
   const [editing, setEditing] = React.useState<DocumentRecord | "new" | null>(null);
+  const [downloadError, setDownloadError] = React.useState<string | null>(null);
 
   const { data: documents, isLoading } = useQuery({
     queryKey: ["documents"],
@@ -131,9 +132,10 @@ export function DocumentsPage() {
   });
 
   const download = async (path: string) => {
+    setDownloadError(null);
     const { data, error } = await supabase.storage.from("documents").createSignedUrl(path, 60);
     if (error || !data) {
-      alert("שגיאה בפתיחת הקובץ: " + (error?.message ?? "לא נמצא"));
+      setDownloadError("שגיאה בפתיחת הקובץ: " + (error?.message ?? "לא נמצא"));
       return;
     }
     window.open(data.signedUrl, "_blank");
@@ -146,6 +148,15 @@ export function DocumentsPage() {
         description="מסמכי בירוקרטיה ותאימות — אישורים, תעודות, היתרים. ניתן לצרף קובץ ולסמן נראות ללקוח."
         action={<Button onClick={() => setEditing((c) => (c === "new" ? null : "new"))}>+ מסמך חדש</Button>}
       />
+
+      {downloadError && (
+        <div className="flex items-center justify-between rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          <span>{downloadError}</span>
+          <button onClick={() => setDownloadError(null)} className="font-medium underline">
+            סגירה
+          </button>
+        </div>
+      )}
 
       {editing && (
         <DocumentForm

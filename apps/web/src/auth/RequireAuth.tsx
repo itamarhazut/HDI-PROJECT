@@ -2,6 +2,7 @@ import * as React from "react";
 import { Navigate, Outlet } from "react-router-dom";
 import { useAuth } from "./AuthProvider";
 import type { UserRole } from "@repo/shared";
+import { FullScreenLoader } from "../components/FullScreenLoader";
 
 interface RequireAuthProps {
   allowedRoles?: UserRole[];
@@ -15,7 +16,7 @@ export function RequireAuth({ allowedRoles }: RequireAuthProps) {
   const { session, profile, loading } = useAuth();
 
   if (loading) {
-    return <div className="flex h-screen items-center justify-center text-muted-foreground">טוען...</div>;
+    return <FullScreenLoader />;
   }
 
   if (!session) {
