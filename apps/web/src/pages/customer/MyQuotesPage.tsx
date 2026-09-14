@@ -1,16 +1,17 @@
 import * as React from "react";
-import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { QUOTE_STATUS_LABELS, strings } from "@repo/shared";
 import { Button, Card, CardContent, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableSkeleton } from "@repo/ui";
 import { StatusBadge } from "../../components/StatusBadge";
 import { PageHeader } from "../../components/PageHeader";
 import { IconFileText } from "../../components/icons";
+import { QuoteViewModal } from "../../components/QuoteViewModal";
 import { formatCurrency, formatDate } from "../../lib/format";
 import { supabase } from "../../lib/supabase";
 
 export function MyQuotesPage() {
   const [expanded, setExpanded] = React.useState<string | null>(null);
+  const [viewingQuoteId, setViewingQuoteId] = React.useState<string | null>(null);
 
   // RLS (quotes_select_own) scopes this to the logged-in customer's own quotes.
   const { data: quotes, isLoading } = useQuery({
@@ -71,11 +72,9 @@ export function MyQuotesPage() {
                           <Button variant="outline" size="sm" onClick={() => setExpanded((c) => (c === q.id ? null : q.id))}>
                             {expanded === q.id ? "סגירה" : "פירוט"}
                           </Button>
-                          <Link to={`/portal/quotes/${q.id}/print`} target="_blank" rel="noreferrer">
-                            <Button variant="outline" size="sm">
-                              PDF / הדפסה
-                            </Button>
-                          </Link>
+                          <Button variant="outline" size="sm" onClick={() => setViewingQuoteId(q.id)}>
+                            צפייה / PDF
+                          </Button>
                         </div>
                       </TableCell>
                     </TableRow>
@@ -107,6 +106,14 @@ export function MyQuotesPage() {
           )}
         </CardContent>
       </Card>
+
+      {viewingQuoteId && (
+        <QuoteViewModal
+          quoteId={viewingQuoteId}
+          onClose={() => setViewingQuoteId(null)}
+          printBasePath="/portal/quotes"
+        />
+      )}
     </div>
   );
 }

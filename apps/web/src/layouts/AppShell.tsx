@@ -1,10 +1,11 @@
 import * as React from "react";
-import { NavLink, Outlet } from "react-router-dom";
+import { Link, NavLink, Outlet } from "react-router-dom";
 import { cn } from "@repo/ui";
 import { strings } from "@repo/shared";
 import { useAuth } from "../auth/AuthProvider";
 import { Logo } from "../components/Logo";
-import { IconLogout } from "../components/icons";
+import { IconLogout, IconSettings } from "../components/icons";
+import { useAppliedTheme } from "../lib/theme";
 
 export interface NavItem {
   to: string;
@@ -46,6 +47,12 @@ const NAV_BADGE_COLORS = [
 
 export function AppShell({ navItems }: AppShellProps) {
   const { profile, signOut } = useAuth();
+  // Applies whichever brand-color preset was picked on the settings page
+  // (app_settings → theme_color) as soon as this shell mounts — shared by
+  // both the admin and customer-portal layouts, so the chosen color follows
+  // the business everywhere, not just the admin side. No return value is
+  // needed here; the hook's own effect does the actual repainting.
+  useAppliedTheme();
 
   return (
     <div className="flex min-h-screen">
@@ -94,6 +101,18 @@ export function AppShell({ navItems }: AppShellProps) {
                 {profile?.role ? ROLE_LABELS[profile.role] ?? profile.role : ""}
               </p>
             </div>
+            {/* Tucked here rather than a full nav item, per the business
+                owner's own preference — a small, low-key entry point since
+                it's opened rarely, not a page visited day to day. */}
+            {profile?.role === "admin" && (
+              <Link
+                to="/admin/settings"
+                aria-label={strings.nav.settings}
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-sidebar-muted-foreground transition-colors hover:bg-black/5 hover:text-sidebar-foreground"
+              >
+                <IconSettings className="h-[18px] w-[18px]" />
+              </Link>
+            )}
           </div>
           <button
             onClick={() => void signOut()}

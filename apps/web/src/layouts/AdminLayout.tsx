@@ -1,29 +1,25 @@
-import { strings } from "@repo/shared";
-import { AppShell, type NavItem } from "./AppShell";
-import {
-  IconBox,
-  IconClipboardCheck,
-  IconDashboard,
-  IconFileText,
-  IconFolder,
-  IconMegaphone,
-  IconReceipt,
-  IconTag,
-  IconUsers,
-} from "../components/icons";
+import { useQuery } from "@tanstack/react-query";
+import { AppShell } from "./AppShell";
+import { ADMIN_NAV_ORDER_SETTINGS_KEY, applyNavOrder } from "./adminNavItems";
+import { supabase } from "../lib/supabase";
 
-const navItems: NavItem[] = [
-  { to: "/admin", label: strings.nav.dashboard, icon: IconDashboard, end: true },
-  { to: "/admin/customers", label: strings.nav.customers, icon: IconUsers },
-  { to: "/admin/jobs", label: strings.nav.jobs, icon: IconClipboardCheck },
-  { to: "/admin/inventory", label: strings.nav.inventory, icon: IconBox },
-  { to: "/admin/price-list", label: strings.nav.priceList, icon: IconTag },
-  { to: "/admin/quotes", label: strings.nav.quotes, icon: IconFileText },
-  { to: "/admin/invoices", label: strings.nav.invoices, icon: IconReceipt },
-  { to: "/admin/documents", label: strings.nav.documents, icon: IconFolder },
-  { to: "/admin/leads", label: strings.nav.leads, icon: IconMegaphone },
-];
-
+// The sidebar's item order can be customized from the settings page (the
+// gear icon → "סדר פריטי התפריט הראשי"), saved as a plain array of `to`
+// paths under this same key — applyNavOrder lays the fixed item list
+// (ADMIN_NAV_ITEMS, in adminNavItems.ts) out in that order.
 export function AdminLayout() {
-  return <AppShell title="HDI Project" navItems={navItems} />;
+  const { data: navOrder } = useQuery({
+    queryKey: ["app_settings", ADMIN_NAV_ORDER_SETTINGS_KEY],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("app_settings")
+        .select("*")
+        .eq("key", ADMIN_NAV_ORDER_SETTINGS_KEY)
+        .maybeSingle();
+      if (error) throw error;
+      return Array.isArray(data?.value) ? (data.value as string[]) : null;
+    },
+  });
+
+  return <AppShell title="HDI Project" navItems={applyNavOrder(navOrder)} />;
 }

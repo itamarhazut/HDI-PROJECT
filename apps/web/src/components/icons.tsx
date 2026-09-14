@@ -103,12 +103,106 @@ export function IconMegaphone(props: IconProps) {
   );
 }
 
+// Generic placeholder for the "חברת חשמל" resource-library section — NOT
+// the real Israel Electric Corporation logo (that's a real company's
+// trademark; I can't draw or reproduce it myself). Swap this out for the
+// real logo once the business owner supplies the actual image file — see
+// ResourceLibraryPage.
+export function IconBolt(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M13 2 5 13h5l-1 9 8-11h-5l1-9Z" fill="currentColor" fillOpacity="0.25" />
+    </svg>
+  );
+}
+
+// Small "i" info icon — used on the "צ׳ק ליסט בדיקה" checklist card to open
+// the reference notes (documents/conditions/sources) in a modal, since the
+// card itself no longer shows that text inline.
+export function IconInfo(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <circle cx="12" cy="12" r="9" fill="currentColor" fillOpacity="0.12" />
+      <line x1="12" y1="11" x2="12" y2="16.5" />
+      <circle cx="12" cy="7.5" r="1" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
 export function IconLogout(props: IconProps) {
   return (
     <svg {...base} {...props}>
       <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
       <polyline points="16 17 21 12 16 7" fill="currentColor" fillOpacity="0.2" />
       <line x1="21" y1="12" x2="9" y2="12" />
+    </svg>
+  );
+}
+
+export function IconChevronDown(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <polyline points="6 9 12 15 18 9" />
+    </svg>
+  );
+}
+
+// Small pencil "edit" icon — used next to each checklist question in
+// "בדיקות" so a question's wording can be changed (or deleted) without
+// digging through a settings page.
+export function IconPencil(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M4 20h4L19.5 8.5a2.1 2.1 0 0 0-3-3L5 17v3Z" fill="currentColor" fillOpacity="0.2" />
+      <path d="M13.5 5.5 18 10" />
+    </svg>
+  );
+}
+
+// A small "line going up" icon — used on the dashboard's revenue stat card
+// and chart, next to IconReceipt (invoices) and IconBox (inventory) as the
+// dashboard's own visual language for "money coming in".
+export function IconTrendingUp(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <polyline points="15 6 21 6 21 12" fill="currentColor" fillOpacity="0.2" />
+      <polyline points="3 17 9 11 13 15 21 6" />
+    </svg>
+  );
+}
+
+// A wallet — the "הוצאות" (business expenses) nav item, deliberately
+// distinct from IconReceipt (invoices — money coming in) since this one
+// tracks money going out of the business.
+export function IconWallet(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M3 7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" fill="currentColor" fillOpacity="0.15" />
+      <path d="M16 12.5h3v3h-3a1.5 1.5 0 0 1 0-3Z" fill="currentColor" fillOpacity="0.4" />
+    </svg>
+  );
+}
+
+// A small gear — the entry point into /admin/settings, tucked next to the
+// user's name at the bottom of the sidebar rather than a full nav item.
+export function IconSettings(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <circle cx="12" cy="12" r="3" fill="currentColor" fillOpacity="0.25" />
+      <circle cx="12" cy="12" r="3" />
+      {[0, 45, 90, 135, 180, 225, 270, 315].map((deg) => (
+        <rect
+          key={deg}
+          x="10.9"
+          y="1.9"
+          width="2.2"
+          height="3"
+          rx="1"
+          fill="currentColor"
+          stroke="none"
+          transform={`rotate(${deg} 12 12)`}
+        />
+      ))}
     </svg>
   );
 }

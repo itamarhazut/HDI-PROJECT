@@ -27,6 +27,7 @@ import { PageHeader } from "../../components/PageHeader";
 import { StatusBadge } from "../../components/StatusBadge";
 import { IconClipboardCheck } from "../../components/icons";
 import { formatDate } from "../../lib/format";
+import { getErrorMessage } from "../../lib/errors";
 import { supabase } from "../../lib/supabase";
 
 export function JobsPage() {
@@ -50,6 +51,18 @@ export function JobsPage() {
       const { data, error } = await supabase.from("customers").select("*").order("name");
       if (error) throw error;
       return data ?? [];
+    },
+  });
+
+  // Just enough of each invoice to know which jobs already have one — so
+  // "צור חשבונית" below doesn't offer to create a second invoice for the
+  // same completed job by mistake.
+  const { data: invoicedJobIds } = useQuery({
+    queryKey: ["invoices", "job_ids"],
+    queryFn: async () => {
+      const { data, error } = await supabase.from("invoices").select("job_id").not("job_id", "is", null);
+      if (error) throw error;
+      return new Set((data ?? []).map((row) => row.job_id as string));
     },
   });
 
@@ -85,7 +98,7 @@ export function JobsPage() {
       setEditing(null);
       toast({ title: "העבודה נשמרה בהצלחה", variant: "success" });
     },
-    onError: (err) => toast({ title: "שמירת העבודה נכשלה", description: err instanceof Error ? err.message : undefined, variant: "error" }),
+    onError: (err) => toast({ title: "שמירת העבודה נכשלה", description: getErrorMessage(err), variant: "error" }),
   });
 
   const remove = useMutation({
@@ -97,7 +110,70 @@ export function JobsPage() {
       void queryClient.invalidateQueries({ queryKey: ["jobs"] });
       toast({ title: "העבודה נמחקה", variant: "success" });
     },
-    onError: (err) => toast({ title: "מחיקת העבודה נכשלה", description: err instanceof Error ? err.message : undefined, variant: "error" }),
+    onError: (err) => toast({ title: "מחיקת העבודה נכשלה", description: getErrorMessage(err), variant: "error" }),
+  });
+
+  // "צור חשבונית" on a completed job — mirrors QuotesPage's convertToJob:
+  // create the related record, then just toast and invalidate (no
+  // navigation), leaving the new invoice to review/edit on its own page.
+  // When the job has a linked quote, that quote's line items are copied
+  // over verbatim so the invoice shows the same detailed breakdown the
+  // customer already saw, instead of a single flat amount.
+  const createInvoiceFromJob = useMutation({
+    mutationFn: async (job: Job) => {
+      let quoteTotal = 0;
+      let quoteLineItems: { price_list_item_id: string | null; description: string; quantity: number; unit_price: number }[] = [];
+
+      if (job.quote_id) {
+        const { data: quote, error: quoteError } = await supabase
+          .from("quotes")
+          .select("*")
+          .eq("id", job.quote_id)
+          .single();
+        if (quoteError) throw quoteError;
+        quoteTotal = quote.total;
+
+        const { data: lineItems, error: lineItemsError } = await supabase
+          .from("quote_line_items")
+          .select("*")
+          .eq("quote_id", job.quote_id)
+          .order("sort_order");
+        if (lineItemsError) throw lineItemsError;
+        quoteLineItems = lineItems ?? [];
+      }
+
+      const { data: invoice, error: invoiceError } = await supabase
+        .from("invoices")
+        .insert({
+          customer_id: job.customer_id,
+          job_id: job.id,
+          quote_id: job.quote_id ?? null,
+          amount: quoteTotal,
+          issued_date: new Date().toISOString().slice(0, 10),
+        })
+        .select("id")
+        .single();
+      if (invoiceError) throw invoiceError;
+
+      if (quoteLineItems.length > 0) {
+        const rows = quoteLineItems.map((li, index) => ({
+          invoice_id: invoice.id as string,
+          price_list_item_id: li.price_list_item_id,
+          description: li.description,
+          quantity: li.quantity,
+          unit_price: li.unit_price,
+          line_total: li.quantity * li.unit_price,
+          sort_order: index,
+        }));
+        const { error: insError } = await supabase.from("invoice_line_items").insert(rows);
+        if (insError) throw insError;
+      }
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["invoices"] });
+      toast({ title: "נוצרה חשבונית מהעבודה", variant: "success" });
+    },
+    onError: (err) => toast({ title: "יצירת החשבונית נכשלה", description: getErrorMessage(err), variant: "error" }),
   });
 
   return (
@@ -149,10 +225,23 @@ export function JobsPage() {
                     </TableCell>
                     <TableCell>{formatDate(j.scheduled_date)}</TableCell>
                     <TableCell>
-                      <div className="flex gap-2">
+                      <div className="flex flex-wrap gap-2">
                         <Button variant="outline" size="sm" onClick={() => setEditing(j)}>
                           {strings.common.edit}
                         </Button>
+                        {j.status === "completed" &&
+                          (invoicedJobIds?.has(j.id) ? (
+                            <span className="self-center text-xs font-medium text-muted-foreground">יש חשבונית ✓</span>
+                          ) : (
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              disabled={createInvoiceFromJob.isPending}
+                              onClick={() => createInvoiceFromJob.mutate(j)}
+                            >
+                              צור חשבונית
+                            </Button>
+                          ))}
                         <Button
                           variant="destructive"
                           size="sm"

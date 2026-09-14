@@ -11,13 +11,20 @@ import { QuotePrintPage } from "./pages/QuotePrintPage";
 
 import { AdminDashboardPage } from "./pages/admin/DashboardPage";
 import { CustomersPage } from "./pages/admin/CustomersPage";
+import { CustomerDetailPage } from "./pages/admin/CustomerDetailPage";
 import { JobsPage } from "./pages/admin/JobsPage";
 import { InventoryPage } from "./pages/admin/InventoryPage";
 import { PriceListPage } from "./pages/admin/PriceListPage";
-import { QuotesPage } from "./pages/admin/QuotesPage";
-import { InvoicesPage } from "./pages/admin/InvoicesPage";
+import { QuotesAndInvoicesPage } from "./pages/admin/QuotesAndInvoicesPage";
+import { QuoteDetailPage } from "./pages/admin/QuoteDetailPage";
+import { InvoiceDetailPage } from "./pages/admin/InvoiceDetailPage";
+import { ExpensesPage } from "./pages/admin/ExpensesPage";
+import { ExpenseDetailPage } from "./pages/admin/ExpenseDetailPage";
 import { DocumentsPage } from "./pages/admin/DocumentsPage";
+import { ResourceLibraryPage } from "./pages/admin/ResourceLibraryPage";
+import { ResourceCategoryDetailPage } from "./pages/admin/ResourceCategoryDetailPage";
 import { LeadsPage } from "./pages/admin/LeadsPage";
+import { SettingsPage } from "./pages/admin/SettingsPage";
 
 import { CustomerDashboardPage } from "./pages/customer/CustomerDashboardPage";
 import { MyJobsPage } from "./pages/customer/MyJobsPage";
@@ -46,13 +53,20 @@ const router = createHashRouter([
             children: [
               { index: true, element: <AdminDashboardPage /> },
               { path: "customers", element: <CustomersPage /> },
+              { path: "customers/:id", element: <CustomerDetailPage /> },
               { path: "jobs", element: <JobsPage /> },
               { path: "inventory", element: <InventoryPage /> },
               { path: "price-list", element: <PriceListPage /> },
-              { path: "quotes", element: <QuotesPage /> },
-              { path: "invoices", element: <InvoicesPage /> },
+              { path: "quotes", element: <QuotesAndInvoicesPage /> },
+              { path: "quotes/:id", element: <QuoteDetailPage /> },
+              { path: "invoices/:id", element: <InvoiceDetailPage /> },
+              { path: "expenses", element: <ExpensesPage /> },
+              { path: "expenses/:id", element: <ExpenseDetailPage /> },
               { path: "documents", element: <DocumentsPage /> },
+              { path: "resources", element: <ResourceLibraryPage /> },
+              { path: "resources/:categoryId", element: <ResourceCategoryDetailPage /> },
               { path: "leads", element: <LeadsPage /> },
+              { path: "settings", element: <SettingsPage /> },
             ],
           },
           // Outside AdminLayout on purpose — a print/PDF view has no

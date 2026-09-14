@@ -11,3 +11,5 @@ export * from "./components/Toast";
 export * from "./components/ConfirmDialog";
 export * from "./components/Skeleton";
 export * from "./components/TableSkeleton";
+export * from "./components/Modal";
+export * from "./components/Combobox";

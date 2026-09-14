@@ -50,3 +50,17 @@
 .shadow-sm {
   box-shadow: 0 2px 10px -2px rgb(0 0 0 / 0.08), 0 1px 3px -1px rgb(0 0 0 / 0.05);
 }
+
+/* Browsers strip background colors when printing by default (an ink-saving
+   default from the paper-printing era) — without this, the quote
+   document's colored header/total bands would silently vanish from the
+   printed/PDF version even though they show fine on screen. This also
+   matters for our own PDF export (QuoteDocumentView → html2canvas), since
+   that renders the live DOM, not a printed page — but costs nothing to
+   set globally. */
+@media print {
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}

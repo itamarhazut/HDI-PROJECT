@@ -33,6 +33,8 @@ import { PageHeader } from "../../components/PageHeader";
 import { StatusBadge } from "../../components/StatusBadge";
 import { IconFolder } from "../../components/icons";
 import { formatDate } from "../../lib/format";
+import { getErrorMessage } from "../../lib/errors";
+import { safeStorageFileName } from "../../lib/storage";
 import { supabase } from "../../lib/supabase";
 
 const documentFormSchema = documentSchema.extend({
@@ -94,7 +96,7 @@ export function DocumentsPage() {
       let filePath = existingFilePath;
       if (file) {
         const folder = values.customer_id || "general";
-        const path = `${folder}/${Date.now()}-${file.name}`;
+        const path = `${folder}/${Date.now()}-${safeStorageFileName(file.name)}`;
         const { error: upErr } = await supabase.storage.from("documents").upload(path, file, { upsert: true });
         if (upErr) throw upErr;
         filePath = path;
@@ -125,7 +127,7 @@ export function DocumentsPage() {
       setEditing(null);
       toast({ title: "המסמך נשמר בהצלחה", variant: "success" });
     },
-    onError: (err) => toast({ title: "שמירת המסמך נכשלה", description: err instanceof Error ? err.message : undefined, variant: "error" }),
+    onError: (err) => toast({ title: "שמירת המסמך נכשלה", description: getErrorMessage(err), variant: "error" }),
   });
 
   const remove = useMutation({
@@ -140,7 +142,7 @@ export function DocumentsPage() {
       void queryClient.invalidateQueries({ queryKey: ["documents"] });
       toast({ title: "המסמך נמחק", variant: "success" });
     },
-    onError: (err) => toast({ title: "מחיקת המסמך נכשלה", description: err instanceof Error ? err.message : undefined, variant: "error" }),
+    onError: (err) => toast({ title: "מחיקת המסמך נכשלה", description: getErrorMessage(err), variant: "error" }),
   });
 
   const download = async (path: string) => {

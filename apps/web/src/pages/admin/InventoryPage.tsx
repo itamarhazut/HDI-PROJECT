@@ -32,6 +32,7 @@ import {
 import { FormField } from "../../components/FormField";
 import { PageHeader } from "../../components/PageHeader";
 import { IconBox } from "../../components/icons";
+import { getErrorMessage } from "../../lib/errors";
 import { supabase } from "../../lib/supabase";
 
 const REASON_LABELS: Record<InventoryReason, string> = {
@@ -93,7 +94,7 @@ export function InventoryPage() {
       setEditing(null);
       toast({ title: "הפריט נשמר בהצלחה", variant: "success" });
     },
-    onError: (err) => toast({ title: "שמירת הפריט נכשלה", description: err instanceof Error ? err.message : undefined, variant: "error" }),
+    onError: (err) => toast({ title: "שמירת הפריט נכשלה", description: getErrorMessage(err), variant: "error" }),
   });
 
   const remove = useMutation({
@@ -105,7 +106,7 @@ export function InventoryPage() {
       void queryClient.invalidateQueries({ queryKey: ["inventory_items"] });
       toast({ title: "הפריט נמחק", variant: "success" });
     },
-    onError: (err) => toast({ title: "מחיקת הפריט נכשלה", description: err instanceof Error ? err.message : undefined, variant: "error" }),
+    onError: (err) => toast({ title: "מחיקת הפריט נכשלה", description: getErrorMessage(err), variant: "error" }),
   });
 
   const adjust = useMutation({
@@ -122,7 +123,7 @@ export function InventoryPage() {
       setAdjusting(null);
       toast({ title: "המלאי עודכן בהצלחה", variant: "success" });
     },
-    onError: (err) => toast({ title: "עדכון המלאי נכשל", description: err instanceof Error ? err.message : undefined, variant: "error" }),
+    onError: (err) => toast({ title: "עדכון המלאי נכשל", description: getErrorMessage(err), variant: "error" }),
   });
 
   const filtered = (items ?? []).filter((i) => {

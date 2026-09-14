@@ -1,6 +1,7 @@
 import * as React from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { customerSchema, type CustomerInput, type Customer, strings } from "@repo/shared";
 import {
@@ -17,19 +18,25 @@ import {
   TableRow,
   TableSkeleton,
   Textarea,
-  useConfirmDialog,
   useToast,
 } from "@repo/ui";
 import { FormField } from "../../components/FormField";
 import { PageHeader } from "../../components/PageHeader";
 import { IconUsers } from "../../components/icons";
+import { getErrorMessage } from "../../lib/errors";
 import { supabase } from "../../lib/supabase";
 
+// The list itself only browses/creates — every row is a compact link into
+// its own page (CustomerDetailPage), which is where viewing/editing a
+// customer, verifying them, and deleting them actually happens. Same
+// "compact list → its own detail page" split as ResourceLibraryPage /
+// ResourceCategoryDetailPage, so clicking a customer doesn't have to share
+// screen space with the rest of the list.
 export function CustomersPage() {
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const toast = useToast();
-  const confirmDialog = useConfirmDialog();
-  const [editing, setEditing] = React.useState<Customer | "new" | null>(null);
+  const [creating, setCreating] = React.useState(false);
   const [search, setSearch] = React.useState("");
 
   const { data: customers, isLoading } = useQuery({
@@ -41,74 +48,53 @@ export function CustomersPage() {
     },
   });
 
-  const upsert = useMutation({
-    mutationFn: async (values: CustomerInput & { id?: string }) => {
-      const { id, ...rest } = values;
+  const create = useMutation({
+    mutationFn: async (values: CustomerInput) => {
       const payload = {
-        name: rest.name,
-        phone: rest.phone || null,
-        email: rest.email || null,
-        address: rest.address || null,
-        notes: rest.notes || null,
+        name: values.name,
+        document_name: values.document_name || null,
+        business_id: values.business_id || null,
+        phone: values.phone || null,
+        mobile_phone: values.mobile_phone || null,
+        email: values.email || null,
+        address: values.address || null,
+        city: values.city || null,
+        notes: values.notes || null,
       };
-      if (id) {
-        const { error } = await supabase.from("customers").update(payload).eq("id", id);
-        if (error) throw error;
-      } else {
-        const { error } = await supabase.from("customers").insert(payload);
-        if (error) throw error;
-      }
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["customers"] });
-      setEditing(null);
-      toast({ title: "הלקוח נשמר בהצלחה", variant: "success" });
-    },
-    onError: (err) => toast({ title: "שמירת הלקוח נכשלה", description: err instanceof Error ? err.message : undefined, variant: "error" }),
-  });
-
-  const remove = useMutation({
-    mutationFn: async (id: string) => {
-      const { error } = await supabase.from("customers").delete().eq("id", id);
+      const { error } = await supabase.from("customers").insert(payload);
       if (error) throw error;
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["customers"] });
-      toast({ title: "הלקוח נמחק", variant: "success" });
+      setCreating(false);
+      toast({ title: "הלקוח נשמר בהצלחה", variant: "success" });
     },
-    onError: (err) => toast({ title: "מחיקת הלקוח נכשלה", description: err instanceof Error ? err.message : undefined, variant: "error" }),
+    onError: (err) => toast({ title: "שמירת הלקוח נכשלה", description: getErrorMessage(err), variant: "error" }),
   });
 
   const filtered = (customers ?? []).filter((c) => {
     const q = search.trim().toLowerCase();
     if (!q) return true;
-    return [c.name, c.phone, c.email].some((v) => v?.toLowerCase().includes(q));
+    return [c.name, c.phone, c.email, c.business_id].some((v) => v?.toLowerCase().includes(q));
   });
 
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
         title={strings.nav.customers}
-        description="רשימת הלקוחות של העסק — חיפוש, יצירה ועריכה."
+        description="רשימת הלקוחות של העסק — חיפוש ויצירה. לחיצה על לקוח פותחת את כרטיס הלקוח."
         icon={IconUsers}
         color="bg-teal-500"
-        action={
-          <Button
-            onClick={() => setEditing((current) => (current === "new" ? null : "new"))}
-          >
-            + לקוח חדש
-          </Button>
-        }
+        action={<Button onClick={() => setCreating((v) => !v)}>+ לקוח חדש</Button>}
       />
 
-      {editing && (
+      {creating && (
         <CustomerForm
-          key={editing === "new" ? "new" : editing.id}
-          initial={editing === "new" ? null : editing}
-          submitting={upsert.isPending}
-          error={upsert.error instanceof Error ? upsert.error.message : null}
-          onCancel={() => setEditing(null)}
-          onSubmit={(values) => upsert.mutate(editing === "new" ? values : { ...values, id: editing.id })}
+          initial={null}
+          submitting={create.isPending}
+          error={create.error instanceof Error ? create.error.message : null}
+          onCancel={() => setCreating(false)}
+          onSubmit={(values) => create.mutate(values)}
         />
       )}
 
@@ -121,7 +107,7 @@ export function CustomersPage() {
             className="max-w-sm"
           />
           {isLoading ? (
-            <TableSkeleton columns={6} />
+            <TableSkeleton columns={5} />
           ) : filtered.length === 0 ? (
             <p className="text-muted-foreground">{strings.common.noResults}</p>
           ) : (
@@ -133,12 +119,15 @@ export function CustomersPage() {
                   <TableHead>אימייל</TableHead>
                   <TableHead>כתובת</TableHead>
                   <TableHead>סטטוס</TableHead>
-                  <TableHead>{strings.common.actions}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filtered.map((c) => (
-                  <TableRow key={c.id}>
+                  <TableRow
+                    key={c.id}
+                    onClick={() => navigate(`/admin/customers/${c.id}`)}
+                    className="cursor-pointer"
+                  >
                     <TableCell className="font-medium">{c.name}</TableCell>
                     <TableCell>{c.phone ?? "—"}</TableCell>
                     <TableCell>{c.email ?? "—"}</TableCell>
@@ -149,28 +138,6 @@ export function CustomersPage() {
                       ) : (
                         <Badge variant="success">מאומת</Badge>
                       )}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex gap-2">
-                        <Button variant="outline" size="sm" onClick={() => setEditing(c)}>
-                          {strings.common.edit}
-                        </Button>
-                        <Button
-                          variant="destructive"
-                          size="sm"
-                          onClick={async () => {
-                            const ok = await confirmDialog({
-                              title: "מחיקת לקוח",
-                              description: `למחוק את הלקוח "${c.name}"? הפעולה אינה הפיכה.`,
-                              confirmLabel: "מחק",
-                              variant: "destructive",
-                            });
-                            if (ok) remove.mutate(c.id);
-                          }}
-                        >
-                          {strings.common.delete}
-                        </Button>
-                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -191,7 +158,10 @@ interface CustomerFormProps {
   onSubmit: (values: CustomerInput) => void;
 }
 
-function CustomerForm({ initial, submitting, error, onCancel, onSubmit }: CustomerFormProps) {
+// Exported so CustomerDetailPage can reuse the exact same fields/validation
+// for editing an existing customer — this list page only ever uses it for
+// creating a new one.
+export function CustomerForm({ initial, submitting, error, onCancel, onSubmit }: CustomerFormProps) {
   const {
     register,
     handleSubmit,
@@ -200,9 +170,13 @@ function CustomerForm({ initial, submitting, error, onCancel, onSubmit }: Custom
     resolver: zodResolver(customerSchema),
     defaultValues: {
       name: initial?.name ?? "",
+      document_name: initial?.document_name ?? "",
+      business_id: initial?.business_id ?? "",
       phone: initial?.phone ?? "",
+      mobile_phone: initial?.mobile_phone ?? "",
       email: initial?.email ?? "",
       address: initial?.address ?? "",
+      city: initial?.city ?? "",
       notes: initial?.notes ?? "",
     },
   });
@@ -215,14 +189,26 @@ function CustomerForm({ initial, submitting, error, onCancel, onSubmit }: Custom
             <FormField label="שם מלא" htmlFor="name" error={errors.name?.message}>
               <Input id="name" {...register("name")} />
             </FormField>
+            <FormField label="שם למסמכים" htmlFor="document_name" error={errors.document_name?.message}>
+              <Input id="document_name" placeholder="לדוגמה: שם החברה, אם שונה משם הלקוח" {...register("document_name")} />
+            </FormField>
+            <FormField label="מספר עוסק או ח.פ" htmlFor="business_id" error={errors.business_id?.message}>
+              <Input id="business_id" {...register("business_id")} />
+            </FormField>
             <FormField label="טלפון" htmlFor="phone" error={errors.phone?.message}>
               <Input id="phone" {...register("phone")} />
+            </FormField>
+            <FormField label="טלפון נייד" htmlFor="mobile_phone" error={errors.mobile_phone?.message}>
+              <Input id="mobile_phone" {...register("mobile_phone")} />
             </FormField>
             <FormField label="אימייל" htmlFor="email" error={errors.email?.message}>
               <Input id="email" type="email" {...register("email")} />
             </FormField>
             <FormField label="כתובת" htmlFor="address" error={errors.address?.message}>
               <Input id="address" {...register("address")} />
+            </FormField>
+            <FormField label="ישוב" htmlFor="city" error={errors.city?.message}>
+              <Input id="city" {...register("city")} />
             </FormField>
           </div>
           <FormField label="הערות" htmlFor="notes" error={errors.notes?.message}>

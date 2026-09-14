@@ -23,6 +23,7 @@ import { FormField } from "../../components/FormField";
 import { PageHeader } from "../../components/PageHeader";
 import { IconTag } from "../../components/icons";
 import { formatCurrency } from "../../lib/format";
+import { getErrorMessage } from "../../lib/errors";
 import { supabase } from "../../lib/supabase";
 
 export function PriceListPage() {
@@ -66,7 +67,7 @@ export function PriceListPage() {
       setEditing(null);
       toast({ title: "הפריט נשמר בהצלחה", variant: "success" });
     },
-    onError: (err) => toast({ title: "שמירת הפריט נכשלה", description: err instanceof Error ? err.message : undefined, variant: "error" }),
+    onError: (err) => toast({ title: "שמירת הפריט נכשלה", description: getErrorMessage(err), variant: "error" }),
   });
 
   const remove = useMutation({
@@ -78,7 +79,7 @@ export function PriceListPage() {
       void queryClient.invalidateQueries({ queryKey: ["price_list_items"] });
       toast({ title: "הפריט נמחק", variant: "success" });
     },
-    onError: (err) => toast({ title: "מחיקת הפריט נכשלה", description: err instanceof Error ? err.message : undefined, variant: "error" }),
+    onError: (err) => toast({ title: "מחיקת הפריט נכשלה", description: getErrorMessage(err), variant: "error" }),
   });
 
   const filtered = (items ?? []).filter((i) => {
