@@ -81,11 +81,15 @@ export const PANEL_MATERIAL_OPTIONS: { value: PanelMaterial; label: string }[] =
 
 export const GROUNDING_SUPPLY_VOLTAGE = 230;
 
-export interface GroundingCalcState {
+// `type`, not `interface` — this gets written into Inspection.grounding_calc
+// (typed as Record<string, unknown>), and only an object type *literal*
+// structurally satisfies that; an interface never does, even with
+// identical properties (same pitfall as Database in database.ts).
+export type GroundingCalcState = {
   panel_material?: PanelMaterial;
   breaker_rating?: number;
   measured_value?: number;
-}
+};
 
 export function breakerRatingLabel(panelMaterial: PanelMaterial | undefined): string {
   return `מא"ז הגבוה ביותר בלוח (${panelMaterial === "metal" ? "כולל הראשי" : "אחרי הראשי"})`;
@@ -111,10 +115,11 @@ export const INSULATION_UNIT_OPTIONS: { value: InsulationUnit; label: string }[]
   { value: "mohm", label: "מגה-אום (MΩ)" },
 ];
 
-export interface InsulationCalcState {
+// `type`, not `interface` — same reason as GroundingCalcState above.
+export type InsulationCalcState = {
   measured_value?: number;
   unit?: InsulationUnit;
-}
+};
 
 // "תאריך יעד לבדיקה הבאה" — מחושב, לא נשמר בנפרד.
 export function nextInspectionDueDate(inspectionDate: string | undefined, frequencyYears: number | undefined): Date | null {

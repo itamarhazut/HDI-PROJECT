@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type ResourceCategoryInput, type ResourceFile, strings } from "@repo/shared";
 import { Button, useToast } from "@repo/ui";
 import { PageHeader } from "../../components/PageHeader";
+import { DetailToolbar } from "../../components/DetailToolbar";
 import { IconChevronDown } from "../../components/icons";
 import { getErrorMessage } from "../../lib/errors";
 import { supabase } from "../../lib/supabase";
@@ -81,12 +82,19 @@ export function ResourceLibraryPage() {
 
   return (
     <div className="flex flex-col gap-6">
+      {/* Pinned like every detail page's DetailToolbar — see QuotesPage.tsx
+          for the full reasoning. */}
+      <DetailToolbar>
+        <span className="text-sm font-medium text-muted-foreground">{strings.nav.resourceLibrary}</span>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <Button onClick={() => setCreating((v) => !v)}>+ קטגוריה חדשה</Button>
+        </div>
+      </DetailToolbar>
       <PageHeader
         title={strings.nav.resourceLibrary}
         description="מידע, הנחיות וטפסים לעבודה מול חברת חשמל."
         logoSrc={iecLogo}
         logoAlt="חברת החשמל"
-        action={<Button onClick={() => setCreating((v) => !v)}>+ קטגוריה חדשה</Button>}
       />
 
       {creating && (

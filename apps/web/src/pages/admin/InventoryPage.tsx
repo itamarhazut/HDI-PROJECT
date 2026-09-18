@@ -1,6 +1,7 @@
 import * as React from "react";
-import { useForm } from "react-hook-form";
+import { Controller, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
 import {
@@ -17,7 +18,6 @@ import {
   Card,
   CardContent,
   Input,
-  Select,
   Table,
   TableBody,
   TableCell,
@@ -26,26 +26,34 @@ import {
   TableRow,
   TableSkeleton,
   Textarea,
-  useConfirmDialog,
   useToast,
 } from "@repo/ui";
 import { FormField } from "../../components/FormField";
 import { PageHeader } from "../../components/PageHeader";
+import { DetailToolbar } from "../../components/DetailToolbar";
+import { StatusSelect } from "../../components/StatusSelect";
 import { IconBox } from "../../components/icons";
 import { getErrorMessage } from "../../lib/errors";
 import { supabase } from "../../lib/supabase";
 
-const REASON_LABELS: Record<InventoryReason, string> = {
+export const REASON_LABELS: Record<InventoryReason, string> = {
   job_usage: "שימוש בעבודה",
   restock: "חידוש מלאי",
   adjustment: "תיקון ידני",
 };
 
+// The list itself only browses/creates — every row is a compact link into
+// its own page (InventoryItemDetailPage), which is where viewing/editing/
+// deleting an item actually happens. "התאמת מלאי" (stock adjustment) stays
+// as a quick action right here in the row, since it's the single most
+// common thing done from this list — same idea as JobsPage keeping
+// "סיום עבודה" as a row quick-action even after editing moved to its own
+// detail page.
 export function InventoryPage() {
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const toast = useToast();
-  const confirmDialog = useConfirmDialog();
-  const [editing, setEditing] = React.useState<InventoryItem | "new" | null>(null);
+  const [creating, setCreating] = React.useState(false);
   const [adjusting, setAdjusting] = React.useState<InventoryItem | null>(null);
   const [search, setSearch] = React.useState("");
 
@@ -58,55 +66,26 @@ export function InventoryPage() {
     },
   });
 
-  const upsert = useMutation({
-    mutationFn: async (values: InventoryItemInput & { id?: string }) => {
-      const { id, ...rest } = values;
-      if (id) {
-        const { error } = await supabase
-          .from("inventory_items")
-          .update({
-            sku: rest.sku || null,
-            name: rest.name,
-            category: rest.category || null,
-            unit: rest.unit,
-            reorder_threshold: rest.reorder_threshold ?? null,
-            unit_cost: rest.unit_cost ?? null,
-            notes: rest.notes || null,
-          })
-          .eq("id", id);
-        if (error) throw error;
-      } else {
-        const { error } = await supabase.from("inventory_items").insert({
-          sku: rest.sku || null,
-          name: rest.name,
-          category: rest.category || null,
-          unit: rest.unit,
-          quantity_on_hand: rest.quantity_on_hand,
-          reorder_threshold: rest.reorder_threshold ?? null,
-          unit_cost: rest.unit_cost ?? null,
-          notes: rest.notes || null,
-        });
-        if (error) throw error;
-      }
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["inventory_items"] });
-      setEditing(null);
-      toast({ title: "הפריט נשמר בהצלחה", variant: "success" });
-    },
-    onError: (err) => toast({ title: "שמירת הפריט נכשלה", description: getErrorMessage(err), variant: "error" }),
-  });
-
-  const remove = useMutation({
-    mutationFn: async (id: string) => {
-      const { error } = await supabase.from("inventory_items").delete().eq("id", id);
+  const create = useMutation({
+    mutationFn: async (values: InventoryItemInput) => {
+      const { error } = await supabase.from("inventory_items").insert({
+        sku: values.sku || null,
+        name: values.name,
+        category: values.category || null,
+        unit: values.unit,
+        quantity_on_hand: values.quantity_on_hand,
+        reorder_threshold: values.reorder_threshold ?? null,
+        unit_cost: values.unit_cost ?? null,
+        notes: values.notes || null,
+      });
       if (error) throw error;
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["inventory_items"] });
-      toast({ title: "הפריט נמחק", variant: "success" });
+      setCreating(false);
+      toast({ title: "הפריט נשמר בהצלחה", variant: "success" });
     },
-    onError: (err) => toast({ title: "מחיקת הפריט נכשלה", description: getErrorMessage(err), variant: "error" }),
+    onError: (err) => toast({ title: "שמירת הפריט נכשלה", description: getErrorMessage(err), variant: "error" }),
   });
 
   const adjust = useMutation({
@@ -134,22 +113,28 @@ export function InventoryPage() {
 
   return (
     <div className="flex flex-col gap-6">
+      {/* Pinned like every detail page's DetailToolbar — see QuotesPage.tsx
+          for the full reasoning. */}
+      <DetailToolbar>
+        <span className="text-sm font-medium text-muted-foreground">{strings.nav.inventory}</span>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <Button onClick={() => setCreating((v) => !v)}>+ פריט חדש</Button>
+        </div>
+      </DetailToolbar>
       <PageHeader
         title={strings.nav.inventory}
         description="מלאי ציוד וחומרים — כמות במלאי מתעדכנת רק דרך פעולת 'התאמת מלאי'."
         icon={IconBox}
         color="bg-rose-500"
-        action={<Button onClick={() => setEditing((c) => (c === "new" ? null : "new"))}>+ פריט חדש</Button>}
       />
 
-      {editing && (
+      {creating && (
         <InventoryForm
-          key={editing === "new" ? "new" : editing.id}
-          initial={editing === "new" ? null : editing}
-          submitting={upsert.isPending}
-          error={upsert.error instanceof Error ? upsert.error.message : null}
-          onCancel={() => setEditing(null)}
-          onSubmit={(values) => upsert.mutate(editing === "new" ? values : { ...values, id: editing.id })}
+          initial={null}
+          submitting={create.isPending}
+          error={create.error instanceof Error ? create.error.message : null}
+          onCancel={() => setCreating(false)}
+          onSubmit={(values) => create.mutate(values)}
         />
       )}
 
@@ -190,7 +175,11 @@ export function InventoryPage() {
                 {filtered.map((i) => {
                   const low = i.reorder_threshold !== null && i.quantity_on_hand <= i.reorder_threshold;
                   return (
-                    <TableRow key={i.id}>
+                    <TableRow
+                      key={i.id}
+                      onClick={() => navigate(`/admin/inventory/${i.id}`)}
+                      className="cursor-pointer"
+                    >
                       <TableCell>{i.sku ?? "—"}</TableCell>
                       <TableCell className="font-medium">{i.name}</TableCell>
                       <TableCell>{i.category ?? "—"}</TableCell>
@@ -203,29 +192,20 @@ export function InventoryPage() {
                         </div>
                       </TableCell>
                       <TableCell>
-                        <div className="flex gap-2">
-                          <Button variant="outline" size="sm" onClick={() => setAdjusting(i)}>
-                            התאמת מלאי
-                          </Button>
-                          <Button variant="outline" size="sm" onClick={() => setEditing(i)}>
-                            {strings.common.edit}
-                          </Button>
-                          <Button
-                            variant="destructive"
-                            size="sm"
-                            onClick={async () => {
-                              const ok = await confirmDialog({
-                                title: "מחיקת פריט מלאי",
-                                description: `למחוק את הפריט "${i.name}"? הפעולה אינה הפיכה.`,
-                                confirmLabel: "מחק",
-                                variant: "destructive",
-                              });
-                              if (ok) remove.mutate(i.id);
-                            }}
-                          >
-                            {strings.common.delete}
-                          </Button>
-                        </div>
+                        {/* stopPropagation — this button sits inside a row
+                            that navigates to the item's page on click, but
+                            "התאמת מלאי" is a quick action that should stay
+                            right here instead of also opening that page. */}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setAdjusting(i);
+                          }}
+                        >
+                          התאמת מלאי
+                        </Button>
                       </TableCell>
                     </TableRow>
                   );
@@ -239,7 +219,7 @@ export function InventoryPage() {
   );
 }
 
-interface InventoryFormProps {
+export interface InventoryFormProps {
   initial: InventoryItem | null;
   submitting: boolean;
   error: string | null;
@@ -247,7 +227,10 @@ interface InventoryFormProps {
   onSubmit: (values: InventoryItemInput) => void;
 }
 
-function InventoryForm({ initial, submitting, error, onCancel, onSubmit }: InventoryFormProps) {
+// Exported so InventoryItemDetailPage can reuse the exact same fields/
+// validation for editing an existing item — this list page only ever uses
+// it for creating a new one.
+export function InventoryForm({ initial, submitting, error, onCancel, onSubmit }: InventoryFormProps) {
   const {
     register,
     handleSubmit,
@@ -269,7 +252,12 @@ function InventoryForm({ initial, submitting, error, onCancel, onSubmit }: Inven
   return (
     <Card>
       <CardContent className="p-4">
-        <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4">
+        {/* id lets InventoryItemDetailPage's fixed DetailToolbar submit this
+            form with a `form="inventory-form"` button while editing, so
+            "שמור" is reachable without scrolling all the way down here first
+            — same pattern as InspectionHeaderForm's sticky bar (see
+            ResourceCategoryDetailPage) and QuoteForm's "quote-form". */}
+        <form id="inventory-form" onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <FormField label="מק״ט" htmlFor="sku" error={errors.sku?.message}>
               <Input id="sku" {...register("sku")} />
@@ -324,7 +312,7 @@ const adjustSchema = z.object({
 });
 type AdjustInput = z.infer<typeof adjustSchema>;
 
-interface AdjustStockFormProps {
+export interface AdjustStockFormProps {
   item: InventoryItem;
   submitting: boolean;
   error: string | null;
@@ -332,10 +320,13 @@ interface AdjustStockFormProps {
   onSubmit: (values: { quantityDelta: number; reason: InventoryReason }) => void;
 }
 
-function AdjustStockForm({ item, submitting, error, onCancel, onSubmit }: AdjustStockFormProps) {
+// Exported so InventoryItemDetailPage can offer the same "התאמת מלאי" action
+// from the item's own page, not only from the list row.
+export function AdjustStockForm({ item, submitting, error, onCancel, onSubmit }: AdjustStockFormProps) {
   const {
     register,
     handleSubmit,
+    control,
     formState: { errors },
   } = useForm<AdjustInput>({
     resolver: zodResolver(adjustSchema),
@@ -349,19 +340,31 @@ function AdjustStockForm({ item, submitting, error, onCancel, onSubmit }: Adjust
           התאמת מלאי עבור <span className="font-medium text-foreground">{item.name}</span> — כמות נוכחית:{" "}
           {item.quantity_on_hand} {item.unit}. הזן/י מספר חיובי להוספה, שלילי להפחתה.
         </p>
-        <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4">
+        {/* id lets InventoryItemDetailPage's fixed DetailToolbar submit this
+            form with a `form="adjust-stock-form"` button, same pattern as
+            "inventory-form" above. */}
+        <form id="adjust-stock-form" onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <FormField label="שינוי בכמות" htmlFor="quantityDelta" error={errors.quantityDelta?.message}>
               <Input id="quantityDelta" type="number" step="0.01" {...register("quantityDelta")} />
             </FormField>
             <FormField label="סיבה" htmlFor="reason" error={errors.reason?.message}>
-              <Select id="reason" {...register("reason")}>
-                {Object.entries(REASON_LABELS).map(([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
-                  </option>
-                ))}
-              </Select>
+              <Controller
+                name="reason"
+                control={control}
+                render={({ field }) => (
+                  <StatusSelect
+                    id="reason"
+                    showDot={false}
+                    value={field.value}
+                    onChange={field.onChange}
+                    options={Object.entries(REASON_LABELS).map(([value, label]) => ({
+                      value: value as InventoryReason,
+                      label,
+                    }))}
+                  />
+                )}
+              />
             </FormField>
           </div>
           {error && <p className="text-sm text-destructive">{error}</p>}

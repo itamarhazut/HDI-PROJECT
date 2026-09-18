@@ -1,13 +1,16 @@
-import type { ComponentType, SVGProps } from "react";
+import { useMemo, type ComponentType, type SVGProps } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@repo/ui";
 import { QUOTE_STATUS_LABELS, type QuoteStatus, MARKETING_POST_PLATFORM_LABELS } from "@repo/shared";
 import { formatCurrency, formatDate } from "../../lib/format";
 import { supabase } from "../../lib/supabase";
+import { JobsCalendar } from "../../components/JobsCalendar";
 import { PageHeader } from "../../components/PageHeader";
+import { useGoogleCalendarEvents } from "../../hooks/useGoogleCalendarSync";
 import {
   IconBox,
+  IconCalendarSync,
   IconClipboardCheck,
   IconDashboard,
   IconFileText,
@@ -17,6 +20,8 @@ import {
   IconUsers,
   IconWallet,
 } from "../../components/icons";
+
+const todayEventTimeFormatter = new Intl.DateTimeFormat("he-IL", { hour: "2-digit", minute: "2-digit" });
 
 function IconBadge({ color, icon: Icon }: { color: string; icon: ComponentType<SVGProps<SVGSVGElement>> }) {
   return (
@@ -34,7 +39,9 @@ const REVENUE_CHART_MONTHS = 6;
 interface OverdueInvoiceRow {
   id: string;
   customerName: string;
+  /** Outstanding balance, not the invoice's original total. */
   amount: number;
+  dueDate: string | null;
 }
 
 interface LowStockRow {
@@ -78,7 +85,24 @@ interface DashboardData {
   upcomingPosts: UpcomingPostRow[];
 }
 
+// "YYYY-MM-DD" for today in local time — same key format JobsCalendar
+// uses, so the request below asks the Edge Function for exactly one
+// calendar day.
+function todayDateKey() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 export function AdminDashboardPage() {
+  const todayKey = useMemo(() => todayDateKey(), []);
+  // One-way synced phone/Google Calendar events for today only — see
+  // SettingsPage's "סנכרון עם יומן Google" card and JobsCalendar, which
+  // shows the same events (plus the rest of the month) as a small blue
+  // dot per day. This surfaces just today's, front and center, per the
+  // user's request that today's synced event(s) stand out rather than
+  // requiring a click into the calendar widget below.
+  const { data: todayEvents } = useGoogleCalendarEvents(todayKey, todayKey);
+
   const { data, isLoading } = useQuery<DashboardData>({
     queryKey: ["admin-dashboard"],
     queryFn: async () => {
@@ -119,11 +143,17 @@ export function AdminDashboardPage() {
           .select("id", { count: "exact", head: true })
           .eq("status", "completed")
           .gte("completed_at", startOfMonth.toISOString()),
+        // Overdue is a fact about the due date and the balance, not a flag
+        // someone remembered to set — an invoice is late the moment its due
+        // date passes while money is still owed. Asking the question that
+        // way means this card is right without anything sweeping the table
+        // overnight.
         supabase
           .from("invoices")
-          .select("id, amount, customers(name)")
-          .eq("status", "overdue")
-          .order("created_at", { ascending: false })
+          .select("id, amount, amount_paid, due_date, customers(name)")
+          .not("status", "in", "(paid,cancelled)")
+          .lt("due_date", todayStr)
+          .order("due_date", { ascending: true })
           .limit(5),
         supabase.from("inventory_items").select("id, name, quantity_on_hand, reorder_threshold"),
         supabase.from("customers").select("id", { count: "exact", head: true }).eq("pending_review", true),
@@ -176,11 +206,16 @@ export function AdminDashboardPage() {
       const overdueInvoices = ((overdueInvoicesRes.data ?? []) as unknown as Array<{
         id: string;
         amount: number;
+        amount_paid: number | null;
+        due_date: string | null;
         customers: { name: string } | null;
       }>).map((inv) => ({
         id: inv.id,
         customerName: inv.customers?.name ?? "—",
-        amount: inv.amount,
+        // What's actually still owed, so a partly-paid invoice doesn't
+        // shout its original figure.
+        amount: Math.max(0, Math.round((inv.amount - Number(inv.amount_paid ?? 0)) * 100) / 100),
+        dueDate: inv.due_date,
       }));
 
       const upcomingJobs = ((upcomingJobsRes.data ?? []) as unknown as Array<{
@@ -243,41 +278,103 @@ export function AdminDashboardPage() {
     },
   });
 
+  // Every card below links straight to the filtered list it summarizes —
+  // "עבודות פתוחות" and "עבודות שהושלמו" pass `?status=...` that JobsPage
+  // reads to pre-filter its table, and "לקוחות ממתינים לאימות" passes
+  // `?verification=pending` that CustomersPage reads the same way. The
+  // dashboard is meant to be a jumping-off point, not just a read-only
+  // summary.
   const cards = [
-    { label: "עבודות פתוחות", value: data?.openJobs, icon: IconClipboardCheck, color: "bg-amber-500" },
-    { label: "עבודות שהושלמו החודש", value: data?.jobsCompletedThisMonth, icon: IconClipboardCheck, color: "bg-emerald-500" },
+    { label: "עבודות פתוחות", value: data?.openJobs, icon: IconClipboardCheck, color: "bg-amber-500", to: "/admin/jobs?status=open" },
+    {
+      label: "עבודות שהושלמו החודש",
+      value: data?.jobsCompletedThisMonth,
+      icon: IconClipboardCheck,
+      color: "bg-emerald-500",
+      to: "/admin/jobs?status=completed",
+    },
     {
       label: "הכנסות החודש",
       value: data ? formatCurrency(data.revenueThisMonth) : undefined,
       icon: IconTrendingUp,
       color: "bg-teal-600",
+      to: "/admin/quotes?tab=invoices",
     },
     {
       label: "הוצאות החודש",
       value: data ? formatCurrency(data.expensesThisMonth) : undefined,
       icon: IconWallet,
       color: "bg-rose-600",
+      to: "/admin/expenses",
     },
-    { label: "לקוחות ממתינים לאימות", value: data?.pendingCustomers, icon: IconUsers, color: "bg-violet-500" },
+    {
+      label: "לקוחות ממתינים לאימות",
+      value: data?.pendingCustomers,
+      icon: IconUsers,
+      color: "bg-violet-500",
+      to: "/admin/customers?verification=pending",
+    },
   ];
 
   return (
     <div className="flex flex-col gap-6">
       <PageHeader title="לוח בקרה" description="סיכום כללי של מצב העסק." icon={IconDashboard} color="bg-indigo-500" />
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      {/* Only rendered when there's actually something to show — today's
+          synced phone/Google Calendar event(s), front and center above
+          the stat cards, per the user's request that these stand out
+          instead of only appearing as a small dot inside the calendar
+          widget below. Hidden entirely on a day with nothing synced, so
+          it never sits there empty. */}
+      {todayEvents && todayEvents.length > 0 && (
+        <Card className="border-sky-200 bg-sky-50/60">
+          <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-3">
+              <IconBadge color="bg-sky-500" icon={IconCalendarSync} />
+              <div>
+                <p className="text-sm font-semibold">היום ביומן המסונכרן</p>
+                <p className="text-xs text-muted-foreground">אירועים מהטלפון שנרשמו להיום</p>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2 sm:justify-end">
+              {todayEvents.map((ev) => (
+                <span
+                  key={ev.id}
+                  className="rounded-full border border-sky-200 bg-white px-3 py-1 text-xs font-medium text-sky-800"
+                >
+                  {ev.title}
+                  {!ev.allDay && <span className="text-sky-600"> · {todayEventTimeFormatter.format(new Date(ev.start))}</span>}
+                </span>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Five cards, one row on a normal desktop width (lg+) — the whole
+          point is that they sit snugly above JobsCalendar below, not wrap
+          into an orphaned single card on its own line. Padding/text sizes
+          are trimmed a notch from the plain 4-column layout this replaced,
+          since five columns leaves each card noticeably narrower. */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
         {cards.map((card) => (
-          <Card key={card.label}>
-            <CardHeader className="flex-row items-center justify-between gap-3 space-y-0">
-              <CardTitle className="text-sm font-medium text-muted-foreground">{card.label}</CardTitle>
-              <IconBadge color={card.color} icon={card.icon} />
-            </CardHeader>
-            <CardContent>
-              <p className="text-3xl font-bold">{isLoading ? "—" : card.value}</p>
-            </CardContent>
-          </Card>
+          <Link key={card.label} to={card.to} className="block">
+            <Card className="h-full transition-colors hover:border-primary/50 hover:bg-accent/40">
+              <CardHeader className="flex-row items-center justify-between gap-2 space-y-0 p-4">
+                <CardTitle className="text-xs font-medium leading-tight text-muted-foreground sm:text-sm">
+                  {card.label}
+                </CardTitle>
+                <IconBadge color={card.color} icon={card.icon} />
+              </CardHeader>
+              <CardContent className="p-4 pt-0">
+                <p className="text-2xl font-bold">{isLoading ? "—" : card.value}</p>
+              </CardContent>
+            </Card>
+          </Link>
         ))}
       </div>
+
+      <JobsCalendar />
 
       <Card>
         <CardHeader className="flex-row items-center justify-between gap-3 space-y-0">
@@ -401,7 +498,12 @@ export function AdminDashboardPage() {
               <div className="flex flex-col gap-2">
                 {data.overdueInvoices.map((inv) => (
                   <div key={inv.id} className="flex items-center justify-between text-sm">
-                    <span>{inv.customerName}</span>
+                    <span>
+                      {inv.customerName}
+                      {inv.dueDate && (
+                        <span className="text-xs text-muted-foreground"> · {formatDate(inv.dueDate)}</span>
+                      )}
+                    </span>
                     <span className="font-semibold text-destructive">{formatCurrency(inv.amount)}</span>
                   </div>
                 ))}

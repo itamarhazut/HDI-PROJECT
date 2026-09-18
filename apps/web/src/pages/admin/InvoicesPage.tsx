@@ -11,6 +11,7 @@ import {
   type Job,
   type Quote,
   type PriceListItem,
+  type InvoiceStatus,
   INVOICE_STATUS_LABELS,
   strings,
 } from "@repo/shared";
@@ -21,7 +22,6 @@ import {
   Combobox,
   Input,
   Label,
-  Select,
   Table,
   TableBody,
   TableCell,
@@ -34,11 +34,16 @@ import {
 } from "@repo/ui";
 import { FormField } from "../../components/FormField";
 import { PageHeader } from "../../components/PageHeader";
+import { DetailToolbar } from "../../components/DetailToolbar";
 import { StatusBadge } from "../../components/StatusBadge";
+import { StatusSelect } from "../../components/StatusSelect";
 import { IconReceipt } from "../../components/icons";
 import { formatCurrency, formatDate } from "../../lib/format";
+import { computeDocumentTotals } from "../../lib/money";
 import { getErrorMessage } from "../../lib/errors";
 import { supabase } from "../../lib/supabase";
+import { invoiceBalanceState } from "../../lib/invoiceStatus";
+import { useVatRate } from "../../hooks/useVatRate";
 
 const invoiceFormSchema = invoiceSchema.extend({
   status: z.enum(["pending", "marked_invoiced", "paid", "overdue", "cancelled"]).optional(),
@@ -57,6 +62,7 @@ export function InvoicesPage() {
   const toast = useToast();
   const [creating, setCreating] = React.useState(false);
   const [search, setSearch] = React.useState("");
+  const { vatRate } = useVatRate();
 
   const { data: invoices, isLoading } = useQuery({
     queryKey: ["invoices"],
@@ -114,17 +120,31 @@ export function InvoicesPage() {
   const create = useMutation({
     mutationFn: async (values: InvoiceFormInput) => {
       const { line_items, ...rest } = values;
-      // A flat invoice (no itemized rows) keeps whatever amount was typed
-      // in; once there's at least one line item, the total is always
-      // derived from the rows instead.
-      const amount =
-        line_items.length > 0 ? line_items.reduce((sum, li) => sum + li.quantity * li.unit_price, 0) : rest.amount;
+      // Shared with the quote form and the form's own on-screen totals (see
+      // lib/money.ts) so the stored breakdown is exactly what was shown.
+      const totals = computeDocumentTotals({
+        lineItems: line_items,
+        discount: rest.discount,
+        discountType: rest.discount_type,
+        includeVat: rest.include_vat,
+        vatRate,
+        fallbackAmount: rest.amount,
+      });
       const payload = {
         customer_id: rest.customer_id,
         job_id: rest.job_id || null,
         quote_id: rest.quote_id || null,
-        amount,
+        subtotal: totals.subtotal,
+        discount: rest.discount,
+        discount_type: rest.discount_type,
+        include_vat: rest.include_vat,
+        tax_rate: vatRate,
+        tax_amount: totals.taxAmount,
+        amount: totals.total,
         issued_date: rest.issued_date || null,
+        // Immediate terms: due the day it's issued unless told otherwise.
+        due_date: rest.due_date || rest.issued_date || null,
+        allocation_number: rest.allocation_number || null,
         external_provider: rest.external_provider || null,
         external_reference: rest.external_reference || null,
         external_url: rest.external_url || null,
@@ -165,12 +185,19 @@ export function InvoicesPage() {
 
   return (
     <div className="flex flex-col gap-6">
+      {/* Pinned like every detail page's DetailToolbar — see QuotesPage.tsx
+          for the full reasoning. */}
+      <DetailToolbar>
+        <span className="text-sm font-medium text-muted-foreground">{strings.nav.invoices}</span>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <Button onClick={() => setCreating((v) => !v)}>+ חשבונית חדשה</Button>
+        </div>
+      </DetailToolbar>
       <PageHeader
         title={strings.nav.invoices}
         description={'רשימת החשבוניות — חיפוש ויצירה. לחיצה על חשבונית פותחת את כל הפרטים שלה. הפקת חשבונית מס רשמית נעשית עדיין דרך "יש חשבונית" בחוץ.'}
         icon={IconReceipt}
         color="bg-emerald-500"
-        action={<Button onClick={() => setCreating((v) => !v)}>+ חשבונית חדשה</Button>}
       />
 
       {creating && (
@@ -197,7 +224,7 @@ export function InvoicesPage() {
             className="max-w-sm"
           />
           {isLoading ? (
-            <TableSkeleton columns={6} />
+            <TableSkeleton columns={7} />
           ) : filtered.length === 0 ? (
             <p className="text-muted-foreground">{strings.common.noResults}</p>
           ) : (
@@ -207,28 +234,41 @@ export function InvoicesPage() {
                   <TableHead>מס׳</TableHead>
                   <TableHead>לקוח</TableHead>
                   <TableHead>סכום</TableHead>
+                  <TableHead>יתרה</TableHead>
                   <TableHead>{strings.common.status}</TableHead>
-                  <TableHead>הופקה</TableHead>
+                  <TableHead>לתשלום עד</TableHead>
                   <TableHead>קישור חיצוני</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filtered.map((inv) => (
-                  <TableRow
-                    key={inv.id}
-                    onClick={() => navigate(`/admin/invoices/${inv.id}`)}
-                    className="cursor-pointer"
-                  >
-                    <TableCell>#{inv.invoice_number}</TableCell>
-                    <TableCell className="font-medium">{customerNameById.get(inv.customer_id) ?? "—"}</TableCell>
-                    <TableCell>{formatCurrency(inv.amount)}</TableCell>
-                    <TableCell>
-                      <StatusBadge status={inv.status} label={INVOICE_STATUS_LABELS[inv.status] ?? inv.status} />
-                    </TableCell>
-                    <TableCell>{formatDate(inv.issued_date)}</TableCell>
-                    <TableCell>{inv.external_url ? "יש קישור" : "—"}</TableCell>
-                  </TableRow>
-                ))}
+                {filtered.map((inv) => {
+                  // Paid / partially paid / overdue are worked out from the
+                  // payment ledger and the due date rather than read off a
+                  // stored flag, so "באיחור" is true the day it becomes
+                  // true — see lib/invoiceStatus.ts.
+                  const balance = invoiceBalanceState(inv);
+                  return (
+                    <TableRow
+                      key={inv.id}
+                      onClick={() => navigate(`/admin/invoices/${inv.id}`)}
+                      className="cursor-pointer"
+                    >
+                      <TableCell>#{inv.invoice_number}</TableCell>
+                      <TableCell className="font-medium">{customerNameById.get(inv.customer_id) ?? "—"}</TableCell>
+                      <TableCell>{formatCurrency(inv.amount)}</TableCell>
+                      <TableCell className={balance.balance > 0 ? "font-medium" : "text-muted-foreground"}>
+                        {balance.balance > 0 ? formatCurrency(balance.balance) : "—"}
+                      </TableCell>
+                      <TableCell>
+                        <StatusBadge status={balance.badgeStatus} label={balance.label} />
+                      </TableCell>
+                      <TableCell className={balance.state === "overdue" ? "font-medium text-destructive" : undefined}>
+                        {formatDate(inv.due_date ?? inv.issued_date)}
+                      </TableCell>
+                      <TableCell>{inv.external_url ? "יש קישור" : "—"}</TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           )}
@@ -280,7 +320,12 @@ export function InvoiceForm({
       job_id: initial?.job_id ?? "",
       quote_id: initial?.quote_id ?? "",
       amount: initial?.amount ?? 0,
-      issued_date: initial?.issued_date ?? "",
+      discount: initial?.discount ?? 0,
+      discount_type: initial?.discount_type ?? "fixed",
+      include_vat: initial?.include_vat ?? false,
+      issued_date: initial?.issued_date ?? new Date().toISOString().slice(0, 10),
+      due_date: initial?.due_date ?? "",
+      allocation_number: initial?.allocation_number ?? "",
       external_provider: initial?.external_provider ?? "",
       external_reference: initial?.external_reference ?? "",
       external_url: initial?.external_url ?? "",
@@ -297,23 +342,48 @@ export function InvoiceForm({
 
   const { fields, append, remove } = useFieldArray({ control, name: "line_items" });
   const lineItems = watch("line_items");
-  const itemsTotal = lineItems.reduce((sum, li) => sum + (Number(li.quantity) || 0) * (Number(li.unit_price) || 0), 0);
+  const discount = watch("discount");
+  const discountType = watch("discount_type");
+  const includeVat = watch("include_vat");
+  const amountField = watch("amount");
   const itemized = fields.length > 0;
+
+  // Same calculation, same rate, as the save path above and the quote form
+  // (lib/money.ts + useVatRate) — so what's on screen is what gets stored.
+  const { vatRate } = useVatRate();
+  const totals = computeDocumentTotals({
+    lineItems,
+    discount,
+    discountType,
+    includeVat,
+    vatRate,
+    fallbackAmount: amountField,
+  });
 
   return (
     <Card>
       <CardContent className="p-4">
-        <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4">
+        {/* id lets InvoiceDetailPage's fixed DetailToolbar submit this form
+            with a `form="invoice-form"` button while editing, so "שמור" is
+            reachable without scrolling all the way down here first — same
+            pattern as InspectionHeaderForm's sticky bar (see
+            ResourceCategoryDetailPage) and QuoteForm's "quote-form". */}
+        <form id="invoice-form" onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <FormField label="לקוח" htmlFor="customer_id" error={errors.customer_id?.message}>
-              <Select id="customer_id" {...register("customer_id")}>
-                <option value="">בחר/י לקוח...</option>
-                {customers.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </Select>
+              <Controller
+                name="customer_id"
+                control={control}
+                render={({ field }) => (
+                  <Combobox
+                    id="customer_id"
+                    value={field.value}
+                    onChange={field.onChange}
+                    options={customers.map((c) => ({ value: c.id, label: c.name, sublabel: c.phone ?? undefined }))}
+                    placeholder="בחר/י לקוח..."
+                  />
+                )}
+              />
             </FormField>
             {!itemized && (
               <FormField label="סכום (₪)" htmlFor="amount" error={errors.amount?.message}>
@@ -321,37 +391,74 @@ export function InvoiceForm({
               </FormField>
             )}
             <FormField label="עבודה מקושרת" htmlFor="job_id" error={errors.job_id?.message}>
-              <Select id="job_id" {...register("job_id")}>
-                <option value="">ללא</option>
-                {jobs.map((j) => (
-                  <option key={j.id} value={j.id}>
-                    {j.title}
-                  </option>
-                ))}
-              </Select>
+              <Controller
+                name="job_id"
+                control={control}
+                render={({ field }) => (
+                  <Combobox
+                    id="job_id"
+                    value={field.value ?? ""}
+                    onChange={field.onChange}
+                    options={jobs.map((j) => ({ value: j.id, label: j.title }))}
+                    placeholder="בחר/י עבודה..."
+                    emptyOptionLabel="ללא"
+                  />
+                )}
+              />
             </FormField>
             <FormField label="הצעת מחיר מקושרת" htmlFor="quote_id" error={errors.quote_id?.message}>
-              <Select id="quote_id" {...register("quote_id")}>
-                <option value="">ללא</option>
-                {quotes.map((q) => (
-                  <option key={q.id} value={q.id}>
-                    #{q.quote_number}
-                  </option>
-                ))}
-              </Select>
+              <Controller
+                name="quote_id"
+                control={control}
+                render={({ field }) => (
+                  <Combobox
+                    id="quote_id"
+                    value={field.value ?? ""}
+                    onChange={field.onChange}
+                    options={quotes.map((q) => ({ value: q.id, label: `#${q.quote_number}` }))}
+                    placeholder="בחר/י הצעת מחיר..."
+                    emptyOptionLabel="ללא"
+                  />
+                )}
+              />
             </FormField>
             <FormField label="תאריך הפקה" htmlFor="issued_date" error={errors.issued_date?.message}>
               <Input id="issued_date" type="date" {...register("issued_date")} />
             </FormField>
+            <FormField label="לתשלום עד" htmlFor="due_date" error={errors.due_date?.message}>
+              <Input id="due_date" type="date" {...register("due_date")} />
+              <p className="mt-1 text-xs text-muted-foreground">אם ריק — תאריך ההפקה (תשלום מיידי).</p>
+            </FormField>
+            <FormField
+              label="מספר הקצאה"
+              htmlFor="allocation_number"
+              error={errors.allocation_number?.message}
+            >
+              <Input id="allocation_number" dir="ltr" {...register("allocation_number")} />
+              <p className="mt-1 text-xs text-muted-foreground">
+                נדרש בחשבונית מס ללקוח עסקי מעל 5,000 ₪ (לפני מע״מ).
+              </p>
+            </FormField>
             {initial && (
               <FormField label={strings.common.status} htmlFor="status" error={errors.status?.message}>
-                <Select id="status" {...register("status")}>
-                  {Object.entries(INVOICE_STATUS_LABELS).map(([value, label]) => (
-                    <option key={value} value={value}>
-                      {label}
-                    </option>
-                  ))}
-                </Select>
+                <Controller
+                  name="status"
+                  control={control}
+                  render={({ field }) => (
+                    <StatusSelect
+                      id="status"
+                      value={field.value}
+                      onChange={field.onChange}
+                      options={Object.entries(INVOICE_STATUS_LABELS).map(([value, label]) => ({
+                        value: value as InvoiceStatus,
+                        label,
+                      }))}
+                    />
+                  )}
+                />
+                <p className="mt-1 text-xs text-muted-foreground">
+                  &quot;שולם&quot; ו&quot;באיחור&quot; נקבעים מהתשלומים ומתאריך היעד — אין צורך לסמן ידנית.
+                </p>
               </FormField>
             )}
           </div>
@@ -370,7 +477,7 @@ export function InvoiceForm({
             </div>
             {!itemized ? (
               <p className="text-sm text-muted-foreground">
-                אין פריטים מפורטים על החשבונית — הסכום למעלה נכנס ידנית. אפשר להוסיף פירוט על ידי "+ שורה".
+                אין פריטים מפורטים על החשבונית — הסכום למעלה נכנס ידנית. אפשר להוסיף פירוט על ידי &quot;+ שורה&quot;.
               </p>
             ) : (
               <>
@@ -394,12 +501,70 @@ export function InvoiceForm({
                     />
                   ))}
                 </div>
-                <div className="flex justify-end border-t pt-2 text-sm font-medium">
-                  <span className="ms-2 text-muted-foreground">{strings.common.total}:</span>
-                  <span>{formatCurrency(itemsTotal)}</span>
-                </div>
               </>
             )}
+          </div>
+
+          {/* The same discount/VAT block a quote has. Without it an invoice
+              could only carry a bare total, which is what let an edit
+              recompute that total from pre-VAT rows and drop the tax. */}
+          <div className="flex flex-col items-end gap-2 border-t pt-3 text-sm">
+            <div className="flex w-full max-w-xs flex-col gap-1">
+              <div className="flex items-center justify-between gap-2">
+                <Label htmlFor="discount">הנחה</Label>
+                {discountType === "percent" && totals.discountAmount > 0 && (
+                  <span className="text-xs text-muted-foreground">-{formatCurrency(totals.discountAmount)}</span>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <Input id="discount" type="number" step="0.01" className="flex-1" {...register("discount")} />
+                <Controller
+                  name="discount_type"
+                  control={control}
+                  render={({ field }) => (
+                    <StatusSelect
+                      showDot={false}
+                      className="w-16 shrink-0 px-2"
+                      aria-label="סוג הנחה"
+                      value={field.value}
+                      onChange={field.onChange}
+                      options={[
+                        { value: "fixed" as const, label: "₪" },
+                        { value: "percent" as const, label: "%" },
+                      ]}
+                    />
+                  )}
+                />
+              </div>
+            </div>
+
+            <label className="flex items-center gap-2 self-end text-sm">
+              <input type="checkbox" {...register("include_vat")} className="h-4 w-4" />
+              כולל מע״מ ({Math.round(vatRate * 100)}%)
+            </label>
+
+            <div className="flex w-48 justify-between">
+              <span className="text-muted-foreground">סכום ביניים</span>
+              <span>{formatCurrency(totals.subtotal)}</span>
+            </div>
+            {totals.discountAmount > 0 && (
+              <div className="flex w-48 justify-between">
+                <span className="text-muted-foreground">
+                  הנחה{discountType === "percent" ? ` (${Number(discount) || 0}%)` : ""}
+                </span>
+                <span>-{formatCurrency(totals.discountAmount)}</span>
+              </div>
+            )}
+            {includeVat && (
+              <div className="flex w-48 justify-between">
+                <span className="text-muted-foreground">מע״מ ({Math.round(vatRate * 100)}%)</span>
+                <span>{formatCurrency(totals.taxAmount)}</span>
+              </div>
+            )}
+            <div className="flex w-48 justify-between font-medium">
+              <span>{strings.common.total}</span>
+              <span>{formatCurrency(totals.total)}</span>
+            </div>
           </div>
 
           <div className="rounded-md border p-3">

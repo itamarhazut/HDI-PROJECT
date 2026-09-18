@@ -21,7 +21,7 @@ export function Logo({ className, markClassName, wordmarkClassName }: LogoProps)
   return (
     <div className={className ?? "flex items-center gap-2.5"}>
       <LogoMark className={markClassName ?? "h-9 w-9 shrink-0"} />
-      <span className={wordmarkClassName ?? "text-lg font-bold tracking-tight"}>HDI Project</span>
+      <span className={wordmarkClassName ?? "text-xl font-bold tracking-tight"}>HDI PROJECT</span>
     </div>
   );
 }

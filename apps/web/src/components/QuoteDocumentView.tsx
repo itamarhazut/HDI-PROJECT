@@ -19,6 +19,8 @@ export interface QuoteDocumentLineItem {
   quantity: number;
   unit_price: number;
   line_total: number;
+  /** Mask this row's own unit-price/total as "****" — the columns themselves always stay; this used to be a whole-quote toggle that hid the columns entirely, now it's per-row and only masks the numbers. */
+  hidePrice?: boolean;
 }
 
 export interface QuoteDocumentData {
@@ -28,6 +30,8 @@ export interface QuoteDocumentData {
   validUntil: string | null;
   status: QuoteStatus | string;
   customerName: string;
+  /** ח.פ / עוסק מורשה registration number — shown under the customer's name when set. */
+  customerBusinessId?: string | null;
   customerPhone?: string | null;
   customerEmail?: string | null;
   customerAddress?: string | null;
@@ -44,6 +48,8 @@ export interface QuoteDocumentData {
   taxAmount: number;
   total: number;
   notes?: string | null;
+  /** Fixed text shown just above the signature section, the same on every quote (see SettingsPage). */
+  footerText?: string | null;
 }
 
 // Presentational quote document — the same layout is used by the real
@@ -59,14 +65,59 @@ export interface QuoteDocumentData {
 // the owner said it looked "too big and cluttered" next to the reference,
 // which uses color sparingly (one accent tone) and lets whitespace and
 // plain text carry almost everything.
-export function QuoteDocumentView({ data }: { data: QuoteDocumentData }) {
+export function QuoteDocumentView({
+  data,
+  copyLabel = "מקור",
+  fillPage = false,
+}: {
+  data: QuoteDocumentData;
+  /** "מקור" (original) or "העתק" (copy) — a printed/PDF'd document is marked as one or the other; only the
+   * dedicated print route lets the person switch it before printing (see QuotePrintPage). Every other surface
+   * (view modal, live preview, shared PDF) just shows the default "מקור". */
+  copyLabel?: "מקור" | "העתק";
+  /**
+   * When true, the document fills a full printed-page height (matching the
+   * page proportions elementToPdfBlob/lib/pdf.ts assumes for this same
+   * 48rem width) and the signature/footer block is pushed down to the
+   * bottom of that page instead of sitting right under the totals — so a
+   * short quote still looks like a properly laid-out one-page document
+   * instead of ending abruptly partway down. Only meaningful for surfaces
+   * that actually represent a full printed page (the print route, and the
+   * hidden node rasterized for a shared PDF) — left off for the compact
+   * view/preview modals, where forcing a full page's worth of height would
+   * just be a lot of empty space inside a small popup.
+   */
+  fillPage?: boolean;
+}) {
   const statusLabel = QUOTE_STATUS_LABELS[data.status as QuoteStatus] ?? data.status;
+  // The highlighted accent bar above the line items used to show the
+  // customer's address. The business owner asked for that spot to read as
+  // "הערות והבהרות" (notes and clarifications) instead — the address moved
+  // down into the plain customer-details block below, next to phone/email.
+  // The bar itself is now ALWAYS shown (the label alone when there's
+  // nothing to add), not just when notes happen to be filled in — an
+  // earlier version only rendered it when data.notes was truthy, which had
+  // the table's own header row take over the accent styling whenever notes
+  // were empty (so clearing a quote's notes visibly "moved" the accent bar
+  // down onto the כמות/תיאור/... row). Keeping the bar's presence and the
+  // header row's plain styling unconditional avoids that entirely.
 
   return (
-    <div className="mx-auto max-w-3xl bg-card px-10 py-8 text-foreground print:max-w-none">
+    <div
+      className={`mx-auto max-w-3xl bg-card px-10 py-8 text-foreground print:max-w-none${
+        fillPage ? " flex flex-col" : ""
+      }`}
+      // A4 proportions applied to this component's own fixed 48rem (max-w-3xl)
+      // width — 297/210 is the A4 height/width ratio. Matches the page-height
+      // budget elementToPdfBlob computes for a document rasterized at this
+      // same width, so "one full page" here lines up with "one full page"
+      // there.
+      style={fillPage ? { minHeight: "calc(48rem * 297 / 210)" } : undefined}
+    >
       {/* Business identity: name + tax details on one side, mark on the other */}
       <div className="flex items-start justify-between gap-4">
         <div>
+          <p className="text-xs font-semibold text-muted-foreground">בס״ד</p>
           <p className="text-2xl font-bold tracking-tight">HDI PROJECT</p>
           <div className="mt-1 space-y-0.5 text-xs text-muted-foreground">
             <p>
@@ -81,7 +132,10 @@ export function QuoteDocumentView({ data }: { data: QuoteDocumentData }) {
       {/* Title */}
       <div className="mt-8 flex flex-wrap items-baseline justify-between gap-2">
         <h1 className="text-3xl font-bold">הצעת מחיר {data.quoteNumberLabel}</h1>
-        <span className="text-xs text-muted-foreground">{statusLabel}</span>
+        <span className="flex items-center gap-2 text-xs text-muted-foreground">
+          <span className="rounded border border-border px-1.5 py-0.5 font-medium">{copyLabel}</span>
+          {statusLabel}
+        </span>
       </div>
 
       {/* Customer + dates */}
@@ -91,8 +145,10 @@ export function QuoteDocumentView({ data }: { data: QuoteDocumentData }) {
             <span className="text-muted-foreground">לכבוד: </span>
             <span className="font-medium">{data.customerName || "—"}</span>
           </p>
-          {data.customerPhone && <p className="text-muted-foreground">{data.customerPhone}</p>}
-          {data.customerEmail && <p className="text-muted-foreground">{data.customerEmail}</p>}
+          {data.customerBusinessId && <p className="text-muted-foreground">ח.פ / עוסק מורשה: {data.customerBusinessId}</p>}
+          {data.customerPhone && <p className="text-muted-foreground">טלפון: {data.customerPhone}</p>}
+          {data.customerEmail && <p className="text-muted-foreground">אימייל: {data.customerEmail}</p>}
+          {data.customerAddress && <p className="text-muted-foreground">כתובת: {data.customerAddress}</p>}
         </div>
         <div className="space-y-0.5 text-left text-muted-foreground">
           {data.issuedDate && <p>תאריך: {formatDate(data.issuedDate)}</p>}
@@ -102,22 +158,15 @@ export function QuoteDocumentView({ data }: { data: QuoteDocumentData }) {
 
       {/* Line items */}
       <div className="mt-6">
-        {data.customerAddress && (
-          <div className="rounded-t-md bg-accent px-4 py-2 text-sm font-semibold text-accent-foreground">
-            {data.customerAddress}
-          </div>
-        )}
+        <div className="whitespace-pre-wrap rounded-t-md bg-accent px-4 py-2 text-sm font-semibold text-accent-foreground">
+          <span>הערות והבהרות: </span>
+          {data.notes && <span className="font-normal">{data.notes}</span>}
+        </div>
         <table className="w-full border-collapse text-sm">
           <thead>
-            <tr
-              className={
-                data.customerAddress
-                  ? "border-b border-border text-right text-xs font-semibold text-muted-foreground"
-                  : "rounded-t-md bg-accent text-right text-accent-foreground"
-              }
-            >
-              <th className="px-3 py-2.5 font-semibold">תיאור</th>
+            <tr className="border-b border-border text-right text-xs font-semibold text-muted-foreground">
               <th className="px-3 py-2.5 font-semibold">כמות</th>
+              <th className="px-3 py-2.5 font-semibold">תיאור</th>
               <th className="px-3 py-2.5 font-semibold">מחיר יחידה</th>
               <th className="px-3 py-2.5 font-semibold">סה״כ</th>
             </tr>
@@ -125,10 +174,13 @@ export function QuoteDocumentView({ data }: { data: QuoteDocumentData }) {
           <tbody>
             {data.lineItems.map((li) => (
               <tr key={li.id} className="border-b border-border">
-                <td className="px-3 py-2.5">{li.description}</td>
                 <td className="px-3 py-2.5">{li.quantity}</td>
-                <td className="px-3 py-2.5">{formatCurrency(li.unit_price)}</td>
-                <td className="px-3 py-2.5 font-medium">{formatCurrency(li.line_total)}</td>
+                <td className="px-3 py-2.5">{li.description}</td>
+                {/* Masking is per-row, not a whole-column toggle — the
+                    columns themselves always stay so the table's shape
+                    doesn't shift row to row; only the number is replaced. */}
+                <td className="px-3 py-2.5">{li.hidePrice ? "****" : formatCurrency(li.unit_price)}</td>
+                <td className="px-3 py-2.5 font-medium">{li.hidePrice ? "****" : formatCurrency(li.line_total)}</td>
               </tr>
             ))}
           </tbody>
@@ -166,16 +218,22 @@ export function QuoteDocumentView({ data }: { data: QuoteDocumentData }) {
         </div>
       </div>
 
-      {/* Notes */}
-      {data.notes && (
-        <div className="mt-6 border-t border-border pt-4 text-sm">
-          <p className="mb-1 font-medium text-muted-foreground">הערות</p>
-          <p className="whitespace-pre-wrap">{data.notes}</p>
+      {/* Fixed footer text (set once in Settings, appears on every quote) */}
+      {data.footerText && (
+        <div className="mt-6 whitespace-pre-wrap border-t border-border pt-4 text-xs text-muted-foreground">
+          {data.footerText}
         </div>
       )}
 
-      {/* Approval / signature */}
-      <div className="mt-8 border-t border-border pt-5">
+      {/* Approval / signature — when fillPage is on, `mt-auto` (instead of
+          the plain mt-8 spacing) pushes this block, and the footer line
+          right after it, down to the bottom of the page: any leftover
+          space above (a short quote with few line items) becomes margin
+          here instead of leaving the document looking like it just stops
+          partway down. `mt-auto` only does anything because the root div
+          above is a flex column when fillPage is set — without that it's
+          a no-op and this falls back to its normal in-flow position. */}
+      <div className={fillPage ? "mt-auto border-t border-border pt-5" : "mt-8 border-t border-border pt-5"}>
         <p className="mb-4 text-sm font-semibold">אישור הצעת המחיר</p>
         <div className="grid grid-cols-2 gap-x-8 gap-y-5 text-sm sm:grid-cols-4">
           <div>

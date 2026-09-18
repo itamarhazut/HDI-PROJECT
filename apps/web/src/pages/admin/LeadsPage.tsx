@@ -1,5 +1,5 @@
 import * as React from "react";
-import { useForm } from "react-hook-form";
+import { Controller, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
@@ -8,6 +8,9 @@ import {
   marketingPostSchema,
   type Lead,
   type MarketingPost,
+  type LeadStatus,
+  type MarketingPostPlatform,
+  type MarketingPostStatus,
   LEAD_STATUS_LABELS,
   MARKETING_POST_STATUS_LABELS,
   MARKETING_POST_PLATFORM_LABELS,
@@ -18,7 +21,6 @@ import {
   Card,
   CardContent,
   Input,
-  Select,
   Table,
   TableBody,
   TableCell,
@@ -34,9 +36,11 @@ import {
 import { FormField } from "../../components/FormField";
 import { PageHeader } from "../../components/PageHeader";
 import { StatusBadge } from "../../components/StatusBadge";
-import { IconFileText, IconMegaphone } from "../../components/icons";
+import { StatusSelect } from "../../components/StatusSelect";
+import { IconFileText, IconMegaphone, IconPhone, IconWhatsApp } from "../../components/icons";
 import { getErrorMessage } from "../../lib/errors";
 import { formatDate } from "../../lib/format";
+import { toTelHref, toWhatsAppPhone } from "../../lib/phone";
 import { supabase } from "../../lib/supabase";
 
 const leadFormSchema = leadSchema.extend({
@@ -102,16 +106,57 @@ function TabButton({ active, onClick, icon: Icon, children }: TabButtonProps) {
   );
 }
 
+const normalizePhoneForMatch = (phone: string | null | undefined): string | null => {
+  if (!phone) return null;
+  const digits = phone.replace(/\D/g, "").replace(/^972/, "0").replace(/^0*/, "");
+  return digits.length >= 7 ? digits : null;
+};
+
+// Before turning a lead into a customer, check whether one already exists
+// with the same phone (the reliable signal) or, failing that, the exact
+// same name — so "המרה ללקוח" doesn't silently create a second record for
+// someone already in the system under a slightly different lead entry.
+function findDuplicateCustomer(
+  lead: Lead,
+  customers: { id: string; name: string; phone: string | null }[]
+): { id: string; name: string; phone: string | null } | null {
+  const leadPhone = normalizePhoneForMatch(lead.phone);
+  if (leadPhone) {
+    const byPhone = customers.find((c) => normalizePhoneForMatch(c.phone) === leadPhone);
+    if (byPhone) return byPhone;
+  }
+  const leadName = lead.name.trim().toLowerCase();
+  if (leadName) {
+    const byName = customers.find((c) => c.name.trim().toLowerCase() === leadName);
+    if (byName) return byName;
+  }
+  return null;
+}
+
 function LeadsTabContent() {
   const queryClient = useQueryClient();
   const toast = useToast();
   const confirmDialog = useConfirmDialog();
   const [editing, setEditing] = React.useState<Lead | "new" | null>(null);
 
+  const [search, setSearch] = React.useState("");
+  const [statusFilter, setStatusFilter] = React.useState<LeadStatus | "all">("all");
+
   const { data: leads, isLoading } = useQuery({
     queryKey: ["leads"],
     queryFn: async () => {
       const { data, error } = await supabase.from("leads").select("*").order("created_at", { ascending: false });
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+
+  // Only for the "does a customer like this already exist" check before
+  // converting a lead — not shown anywhere on this page.
+  const { data: existingCustomers } = useQuery({
+    queryKey: ["customers", "picker"],
+    queryFn: async () => {
+      const { data, error } = await supabase.from("customers").select("id, name, phone");
       if (error) throw error;
       return data ?? [];
     },
@@ -125,6 +170,7 @@ function LeadsTabContent() {
         phone: rest.phone || null,
         email: rest.email || null,
         source: rest.source || null,
+        next_follow_up_date: rest.next_follow_up_date || null,
         notes: rest.notes || null,
         ...(status ? { status } : {}),
       };
@@ -179,7 +225,11 @@ function LeadsTabContent() {
     onError: (err) => toast({ title: "המרת הליד ללקוח נכשלה", description: getErrorMessage(err), variant: "error" }),
   });
 
-  const leadList = leads ?? [];
+  // Wrapped in its own useMemo (not a bare `leads ?? []`) so its reference
+  // stays stable across renders when `leads` hasn't changed — otherwise the
+  // `?? []` fallback would be a *new* empty array every render, which broke
+  // the bySource useMemo below (its dependency would "change" every time).
+  const leadList = React.useMemo(() => leads ?? [], [leads]);
 
   // A quick "by source" breakdown (אתר / המלצה / פייסבוק...) — the
   // "מעקב על הלידים" part of the request beyond the table itself: at a
@@ -193,6 +243,32 @@ function LeadsTabContent() {
     }
     return [...counts.entries()].sort((a, b) => b[1] - a[1]);
   }, [leadList]);
+
+  const filteredLeads = leadList.filter((lead) => {
+    if (statusFilter !== "all" && lead.status !== statusFilter) return false;
+    const q = search.trim().toLowerCase();
+    if (!q) return true;
+    return [lead.name, lead.phone, lead.email, lead.source].some((v) => v?.toLowerCase().includes(q));
+  });
+
+  // Today as an ISO date string, for the same plain-string comparison the
+  // dashboard already uses for "due today/overdue" — a follow-up date is
+  // only ever a bare date, never a time, so lexicographic comparison of
+  // "YYYY-MM-DD" strings sorts correctly without parsing into a Date.
+  const todayStr = new Date().toISOString().slice(0, 10);
+
+  const handleConvert = async (lead: Lead) => {
+    const duplicate = findDuplicateCustomer(lead, existingCustomers ?? []);
+    const ok = await confirmDialog({
+      title: "המרת ליד ללקוח",
+      description: duplicate
+        ? `כבר קיים לקוח עם אותו ${duplicate.phone && normalizePhoneForMatch(duplicate.phone) === normalizePhoneForMatch(lead.phone) ? "מספר טלפון" : "שם"}: "${duplicate.name}"${duplicate.phone ? ` (${duplicate.phone})` : ""}. להמיר בכל זאת וליצור רשומת לקוח נוספת?`
+        : `להמיר את "${lead.name}" ללקוח?`,
+      confirmLabel: duplicate ? "המרה בכל זאת" : "המרה",
+      variant: duplicate ? "destructive" : "default",
+    });
+    if (ok) convert.mutate(lead);
+  };
 
   return (
     <div className="flex flex-col gap-6">
@@ -224,10 +300,31 @@ function LeadsTabContent() {
       )}
 
       <Card>
-        <CardContent className="p-4">
+        <CardContent className="flex flex-col gap-4 p-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <Input
+              placeholder="חיפוש לפי שם, טלפון, אימייל או מקור..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="max-w-sm"
+            />
+            <StatusSelect
+              aria-label="סינון לפי סטטוס"
+              className="sm:w-48"
+              value={statusFilter}
+              onChange={setStatusFilter}
+              options={[
+                { value: "all" as const, label: "כל הסטטוסים" },
+                ...Object.entries(LEAD_STATUS_LABELS).map(([value, label]) => ({
+                  value: value as LeadStatus,
+                  label,
+                })),
+              ]}
+            />
+          </div>
           {isLoading ? (
-            <TableSkeleton columns={5} />
-          ) : leadList.length === 0 ? (
+            <TableSkeleton columns={6} />
+          ) : filteredLeads.length === 0 ? (
             <p className="text-muted-foreground">{strings.common.noResults}</p>
           ) : (
             <Table>
@@ -237,58 +334,94 @@ function LeadsTabContent() {
                   <TableHead>טלפון</TableHead>
                   <TableHead>מקור</TableHead>
                   <TableHead>{strings.common.status}</TableHead>
+                  <TableHead>מעקב הבא</TableHead>
                   <TableHead>{strings.common.actions}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {leadList.map((lead) => (
-                  <TableRow key={lead.id}>
-                    <TableCell className="font-medium">{lead.name}</TableCell>
-                    <TableCell>{lead.phone ?? "—"}</TableCell>
-                    <TableCell>{lead.source ?? "—"}</TableCell>
-                    <TableCell>
-                      <StatusBadge status={lead.status} label={LEAD_STATUS_LABELS[lead.status] ?? lead.status} />
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex flex-wrap gap-2">
-                        <Button variant="outline" size="sm" onClick={() => setEditing(lead)}>
-                          {strings.common.edit}
-                        </Button>
-                        {lead.status !== "converted" && (
+                {filteredLeads.map((lead) => {
+                  const telHref = toTelHref(lead.phone);
+                  const waPhone = toWhatsAppPhone(lead.phone);
+                  const followUpDue =
+                    !!lead.next_follow_up_date &&
+                    lead.next_follow_up_date <= todayStr &&
+                    lead.status !== "converted" &&
+                    lead.status !== "lost";
+                  return (
+                    <TableRow key={lead.id}>
+                      <TableCell className="font-medium">{lead.name}</TableCell>
+                      <TableCell>{lead.phone ?? "—"}</TableCell>
+                      <TableCell>{lead.source ?? "—"}</TableCell>
+                      <TableCell>
+                        <StatusBadge status={lead.status} label={LEAD_STATUS_LABELS[lead.status] ?? lead.status} />
+                      </TableCell>
+                      <TableCell>
+                        {lead.next_follow_up_date ? (
+                          followUpDue ? (
+                            <StatusBadge status="overdue" label={`לעקוב — ${formatDate(lead.next_follow_up_date)}`} />
+                          ) : (
+                            formatDate(lead.next_follow_up_date)
+                          )
+                        ) : (
+                          "—"
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex flex-wrap gap-2">
+                          {telHref && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="w-9 px-0"
+                              aria-label="חיוג"
+                              title="חיוג"
+                              onClick={() => {
+                                window.location.href = telHref;
+                              }}
+                            >
+                              <IconPhone className="h-4 w-4" />
+                            </Button>
+                          )}
+                          {waPhone && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="w-9 px-0"
+                              aria-label="וואטסאפ"
+                              title="וואטסאפ"
+                              onClick={() => window.open(`https://wa.me/${waPhone}`, "_blank", "noopener,noreferrer")}
+                            >
+                              <IconWhatsApp className="h-4 w-4" />
+                            </Button>
+                          )}
+                          <Button variant="outline" size="sm" onClick={() => setEditing(lead)}>
+                            {strings.common.edit}
+                          </Button>
+                          {lead.status !== "converted" && (
+                            <Button variant="secondary" size="sm" onClick={() => void handleConvert(lead)}>
+                              המרה ללקוח
+                            </Button>
+                          )}
                           <Button
-                            variant="secondary"
+                            variant="destructive"
                             size="sm"
                             onClick={async () => {
                               const ok = await confirmDialog({
-                                title: "המרת ליד ללקוח",
-                                description: `להמיר את "${lead.name}" ללקוח?`,
-                                confirmLabel: "המרה",
+                                title: "מחיקת ליד",
+                                description: `למחוק את הליד "${lead.name}"? הפעולה אינה הפיכה.`,
+                                confirmLabel: "מחק",
+                                variant: "destructive",
                               });
-                              if (ok) convert.mutate(lead);
+                              if (ok) remove.mutate(lead.id);
                             }}
                           >
-                            המרה ללקוח
+                            {strings.common.delete}
                           </Button>
-                        )}
-                        <Button
-                          variant="destructive"
-                          size="sm"
-                          onClick={async () => {
-                            const ok = await confirmDialog({
-                              title: "מחיקת ליד",
-                              description: `למחוק את הליד "${lead.name}"? הפעולה אינה הפיכה.`,
-                              confirmLabel: "מחק",
-                              variant: "destructive",
-                            });
-                            if (ok) remove.mutate(lead.id);
-                          }}
-                        >
-                          {strings.common.delete}
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           )}
@@ -310,6 +443,7 @@ function LeadForm({ initial, submitting, error, onCancel, onSubmit }: LeadFormPr
   const {
     register,
     handleSubmit,
+    control,
     formState: { errors },
   } = useForm<LeadFormInput>({
     resolver: zodResolver(leadFormSchema),
@@ -318,6 +452,7 @@ function LeadForm({ initial, submitting, error, onCancel, onSubmit }: LeadFormPr
       phone: initial?.phone ?? "",
       email: initial?.email ?? "",
       source: initial?.source ?? "",
+      next_follow_up_date: initial?.next_follow_up_date ?? "",
       notes: initial?.notes ?? "",
       status: initial?.status ?? "new",
     },
@@ -340,15 +475,26 @@ function LeadForm({ initial, submitting, error, onCancel, onSubmit }: LeadFormPr
             <FormField label="מקור" htmlFor="source" error={errors.source?.message}>
               <Input id="source" placeholder="אתר, המלצה, פייסבוק..." {...register("source")} />
             </FormField>
+            <FormField label="תאריך מעקב הבא" htmlFor="next_follow_up_date" error={errors.next_follow_up_date?.message}>
+              <Input id="next_follow_up_date" type="date" {...register("next_follow_up_date")} />
+            </FormField>
             {initial && (
               <FormField label={strings.common.status} htmlFor="status" error={errors.status?.message}>
-                <Select id="status" {...register("status")}>
-                  {Object.entries(LEAD_STATUS_LABELS).map(([value, label]) => (
-                    <option key={value} value={value}>
-                      {label}
-                    </option>
-                  ))}
-                </Select>
+                <Controller
+                  name="status"
+                  control={control}
+                  render={({ field }) => (
+                    <StatusSelect
+                      id="status"
+                      value={field.value as LeadStatus}
+                      onChange={field.onChange}
+                      options={Object.entries(LEAD_STATUS_LABELS).map(([value, label]) => ({
+                        value: value as LeadStatus,
+                        label,
+                      }))}
+                    />
+                  )}
+                />
               </FormField>
             )}
           </div>
@@ -536,6 +682,7 @@ function MarketingPostForm({ initial, submitting, error, onCancel, onSubmit }: M
   const {
     register,
     handleSubmit,
+    control,
     formState: { errors },
   } = useForm<MarketingPostFormInput>({
     resolver: zodResolver(marketingPostFormSchema),
@@ -558,26 +705,43 @@ function MarketingPostForm({ initial, submitting, error, onCancel, onSubmit }: M
               <Input id="title" {...register("title")} />
             </FormField>
             <FormField label="פלטפורמה" htmlFor="platform" error={errors.platform?.message}>
-              <Select id="platform" {...register("platform")}>
-                {Object.entries(MARKETING_POST_PLATFORM_LABELS).map(([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
-                  </option>
-                ))}
-              </Select>
+              <Controller
+                name="platform"
+                control={control}
+                render={({ field }) => (
+                  <StatusSelect
+                    id="platform"
+                    showDot={false}
+                    value={field.value as MarketingPostPlatform}
+                    onChange={field.onChange}
+                    options={Object.entries(MARKETING_POST_PLATFORM_LABELS).map(([value, label]) => ({
+                      value: value as MarketingPostPlatform,
+                      label,
+                    }))}
+                  />
+                )}
+              />
             </FormField>
             <FormField label="תאריך מתוכנן" htmlFor="scheduled_date" error={errors.scheduled_date?.message}>
               <Input id="scheduled_date" type="date" {...register("scheduled_date")} />
             </FormField>
             {initial && (
               <FormField label={strings.common.status} htmlFor="status" error={errors.status?.message}>
-                <Select id="status" {...register("status")}>
-                  {Object.entries(MARKETING_POST_STATUS_LABELS).map(([value, label]) => (
-                    <option key={value} value={value}>
-                      {label}
-                    </option>
-                  ))}
-                </Select>
+                <Controller
+                  name="status"
+                  control={control}
+                  render={({ field }) => (
+                    <StatusSelect
+                      id="status"
+                      value={field.value as MarketingPostStatus}
+                      onChange={field.onChange}
+                      options={Object.entries(MARKETING_POST_STATUS_LABELS).map(([value, label]) => ({
+                        value: value as MarketingPostStatus,
+                        label,
+                      }))}
+                    />
+                  )}
+                />
               </FormField>
             )}
           </div>

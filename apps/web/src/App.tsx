@@ -8,19 +8,24 @@ import { SignUpPage } from "./pages/auth/SignUpPage";
 import { RoleRedirect } from "./pages/RoleRedirect";
 import { NotFoundPage } from "./pages/NotFoundPage";
 import { QuotePrintPage } from "./pages/QuotePrintPage";
+import { InvoicePrintPage } from "./pages/InvoicePrintPage";
 
 import { AdminDashboardPage } from "./pages/admin/DashboardPage";
 import { CustomersPage } from "./pages/admin/CustomersPage";
 import { CustomerDetailPage } from "./pages/admin/CustomerDetailPage";
 import { JobsPage } from "./pages/admin/JobsPage";
+import { JobDetailPage } from "./pages/admin/JobDetailPage";
 import { InventoryPage } from "./pages/admin/InventoryPage";
+import { InventoryItemDetailPage } from "./pages/admin/InventoryItemDetailPage";
 import { PriceListPage } from "./pages/admin/PriceListPage";
+import { PriceListItemDetailPage } from "./pages/admin/PriceListItemDetailPage";
 import { QuotesAndInvoicesPage } from "./pages/admin/QuotesAndInvoicesPage";
 import { QuoteDetailPage } from "./pages/admin/QuoteDetailPage";
 import { InvoiceDetailPage } from "./pages/admin/InvoiceDetailPage";
 import { ExpensesPage } from "./pages/admin/ExpensesPage";
 import { ExpenseDetailPage } from "./pages/admin/ExpenseDetailPage";
 import { DocumentsPage } from "./pages/admin/DocumentsPage";
+import { DocumentDetailPage } from "./pages/admin/DocumentDetailPage";
 import { ResourceLibraryPage } from "./pages/admin/ResourceLibraryPage";
 import { ResourceCategoryDetailPage } from "./pages/admin/ResourceCategoryDetailPage";
 import { LeadsPage } from "./pages/admin/LeadsPage";
@@ -55,14 +60,18 @@ const router = createHashRouter([
               { path: "customers", element: <CustomersPage /> },
               { path: "customers/:id", element: <CustomerDetailPage /> },
               { path: "jobs", element: <JobsPage /> },
+              { path: "jobs/:id", element: <JobDetailPage /> },
               { path: "inventory", element: <InventoryPage /> },
+              { path: "inventory/:id", element: <InventoryItemDetailPage /> },
               { path: "price-list", element: <PriceListPage /> },
+              { path: "price-list/:id", element: <PriceListItemDetailPage /> },
               { path: "quotes", element: <QuotesAndInvoicesPage /> },
               { path: "quotes/:id", element: <QuoteDetailPage /> },
               { path: "invoices/:id", element: <InvoiceDetailPage /> },
               { path: "expenses", element: <ExpensesPage /> },
               { path: "expenses/:id", element: <ExpenseDetailPage /> },
               { path: "documents", element: <DocumentsPage /> },
+              { path: "documents/:id", element: <DocumentDetailPage /> },
               { path: "resources", element: <ResourceLibraryPage /> },
               { path: "resources/:categoryId", element: <ResourceCategoryDetailPage /> },
               { path: "leads", element: <LeadsPage /> },
@@ -72,6 +81,7 @@ const router = createHashRouter([
           // Outside AdminLayout on purpose — a print/PDF view has no
           // sidebar chrome, just the document itself.
           { path: "quotes/:id/print", element: <QuotePrintPage /> },
+          { path: "invoices/:id/print", element: <InvoicePrintPage /> },
         ],
       },
       {

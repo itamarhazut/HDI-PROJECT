@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type Customer, type CustomerInput, strings } from "@repo/shared";
 import { Badge, Button, Card, CardContent, useConfirmDialog, useToast } from "@repo/ui";
+import { DetailToolbar } from "../../components/DetailToolbar";
 import { PageHeader } from "../../components/PageHeader";
 import { IconUsers } from "../../components/icons";
 import { getErrorMessage } from "../../lib/errors";
@@ -103,7 +104,69 @@ export function CustomerDetailPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <BackLink />
+      <DetailToolbar>
+        <Link to="/admin/customers" className="text-sm font-medium text-muted-foreground hover:text-foreground">
+          ‹ {strings.common.back} ללקוחות
+        </Link>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {/* Pinned Cancel/Save while editing — the form's own buttons sit
+              at the bottom of the form, so without this they'd only be
+              reachable after scrolling all the way down. Save submits the
+              form by id (same pattern as InspectionHeaderForm's sticky
+              bar). */}
+          {editing && (
+            <>
+              <Button variant="outline" size="sm" onClick={() => setEditing(false)}>
+                {strings.common.cancel}
+              </Button>
+              <Button type="submit" form="customer-form" size="sm" disabled={update.isPending}>
+                {strings.common.save}
+              </Button>
+            </>
+          )}
+          {!editing && (
+            <>
+              <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
+                {strings.common.edit}
+              </Button>
+              {customer.pending_review ? (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={setVerification.isPending}
+                  onClick={() => setVerification.mutate(false)}
+                >
+                  אימות לקוח
+                </Button>
+              ) : (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={setVerification.isPending}
+                  onClick={() => setVerification.mutate(true)}
+                >
+                  בטל אימות
+                </Button>
+              )}
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={async () => {
+                  const ok = await confirmDialog({
+                    title: "מחיקת לקוח",
+                    description: `למחוק את הלקוח "${customer.name}"? הפעולה אינה הפיכה.`,
+                    confirmLabel: "מחק",
+                    variant: "destructive",
+                  });
+                  if (ok) remove.mutate();
+                }}
+              >
+                {strings.common.delete}
+              </Button>
+            </>
+          )}
+        </div>
+      </DetailToolbar>
       <PageHeader title={customer.name} description="כרטיס לקוח." icon={IconUsers} color="bg-teal-500" />
 
       {editing ? (
@@ -166,46 +229,6 @@ export function CustomerDetailPage() {
                 <p className="whitespace-pre-wrap text-sm">{customer.notes}</p>
               </div>
             )}
-
-            <div className="flex flex-wrap gap-2 border-t border-border pt-4">
-              <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
-                {strings.common.edit}
-              </Button>
-              {customer.pending_review ? (
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  disabled={setVerification.isPending}
-                  onClick={() => setVerification.mutate(false)}
-                >
-                  אימות לקוח
-                </Button>
-              ) : (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={setVerification.isPending}
-                  onClick={() => setVerification.mutate(true)}
-                >
-                  בטל אימות
-                </Button>
-              )}
-              <Button
-                variant="destructive"
-                size="sm"
-                onClick={async () => {
-                  const ok = await confirmDialog({
-                    title: "מחיקת לקוח",
-                    description: `למחוק את הלקוח "${customer.name}"? הפעולה אינה הפיכה.`,
-                    confirmLabel: "מחק",
-                    variant: "destructive",
-                  });
-                  if (ok) remove.mutate();
-                }}
-              >
-                {strings.common.delete}
-              </Button>
-            </div>
           </CardContent>
         </Card>
       )}

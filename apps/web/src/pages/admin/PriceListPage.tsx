@@ -1,6 +1,7 @@
 import * as React from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { priceListItemSchema, type PriceListItemInput, type PriceListItem, strings } from "@repo/shared";
 import {
@@ -16,21 +17,26 @@ import {
   TableHeader,
   TableRow,
   TableSkeleton,
-  useConfirmDialog,
   useToast,
 } from "@repo/ui";
 import { FormField } from "../../components/FormField";
 import { PageHeader } from "../../components/PageHeader";
+import { DetailToolbar } from "../../components/DetailToolbar";
 import { IconTag } from "../../components/icons";
 import { formatCurrency } from "../../lib/format";
 import { getErrorMessage } from "../../lib/errors";
 import { supabase } from "../../lib/supabase";
 
+// The list itself only browses/creates — every row is a compact link into
+// its own page (PriceListItemDetailPage), which is where viewing/editing/
+// deleting an item actually happens. Same "compact list → its own detail
+// page" split as CustomersPage / JobsPage, so clicking an item doesn't have
+// to share screen space with the rest of the list.
 export function PriceListPage() {
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const toast = useToast();
-  const confirmDialog = useConfirmDialog();
-  const [editing, setEditing] = React.useState<PriceListItem | "new" | null>(null);
+  const [creating, setCreating] = React.useState(false);
   const [search, setSearch] = React.useState("");
 
   const { data: items, isLoading } = useQuery({
@@ -42,44 +48,26 @@ export function PriceListPage() {
     },
   });
 
-  const upsert = useMutation({
-    mutationFn: async (values: PriceListItemInput & { id?: string }) => {
-      const { id, ...rest } = values;
+  const create = useMutation({
+    mutationFn: async (values: PriceListItemInput) => {
       const payload = {
-        code: rest.code || null,
-        name: rest.name,
-        category: rest.category || null,
-        unit: rest.unit,
-        unit_price: rest.unit_price,
-        default_cost: rest.default_cost ?? null,
-        is_active: rest.is_active,
+        code: values.code || null,
+        name: values.name,
+        category: values.category || null,
+        unit: values.unit,
+        unit_price: values.unit_price,
+        default_cost: values.default_cost ?? null,
+        is_active: values.is_active,
       };
-      if (id) {
-        const { error } = await supabase.from("price_list_items").update(payload).eq("id", id);
-        if (error) throw error;
-      } else {
-        const { error } = await supabase.from("price_list_items").insert(payload);
-        if (error) throw error;
-      }
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["price_list_items"] });
-      setEditing(null);
-      toast({ title: "הפריט נשמר בהצלחה", variant: "success" });
-    },
-    onError: (err) => toast({ title: "שמירת הפריט נכשלה", description: getErrorMessage(err), variant: "error" }),
-  });
-
-  const remove = useMutation({
-    mutationFn: async (id: string) => {
-      const { error } = await supabase.from("price_list_items").delete().eq("id", id);
+      const { error } = await supabase.from("price_list_items").insert(payload);
       if (error) throw error;
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["price_list_items"] });
-      toast({ title: "הפריט נמחק", variant: "success" });
+      setCreating(false);
+      toast({ title: "הפריט נשמר בהצלחה", variant: "success" });
     },
-    onError: (err) => toast({ title: "מחיקת הפריט נכשלה", description: getErrorMessage(err), variant: "error" }),
+    onError: (err) => toast({ title: "שמירת הפריט נכשלה", description: getErrorMessage(err), variant: "error" }),
   });
 
   const filtered = (items ?? []).filter((i) => {
@@ -90,22 +78,28 @@ export function PriceListPage() {
 
   return (
     <div className="flex flex-col gap-6">
+      {/* Pinned like every detail page's DetailToolbar — see QuotesPage.tsx
+          for the full reasoning. */}
+      <DetailToolbar>
+        <span className="text-sm font-medium text-muted-foreground">{strings.nav.priceList}</span>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <Button onClick={() => setCreating((v) => !v)}>+ פריט חדש</Button>
+        </div>
+      </DetailToolbar>
       <PageHeader
         title={strings.nav.priceList}
         description="מחירון הציוד והשירותים — משמש לבניית הצעות מחיר."
         icon={IconTag}
         color="bg-violet-500"
-        action={<Button onClick={() => setEditing((c) => (c === "new" ? null : "new"))}>+ פריט חדש</Button>}
       />
 
-      {editing && (
+      {creating && (
         <PriceListForm
-          key={editing === "new" ? "new" : editing.id}
-          initial={editing === "new" ? null : editing}
-          submitting={upsert.isPending}
-          error={upsert.error instanceof Error ? upsert.error.message : null}
-          onCancel={() => setEditing(null)}
-          onSubmit={(values) => upsert.mutate(editing === "new" ? values : { ...values, id: editing.id })}
+          initial={null}
+          submitting={create.isPending}
+          error={create.error instanceof Error ? create.error.message : null}
+          onCancel={() => setCreating(false)}
+          onSubmit={(values) => create.mutate(values)}
         />
       )}
 
@@ -118,7 +112,7 @@ export function PriceListPage() {
             className="max-w-sm"
           />
           {isLoading ? (
-            <TableSkeleton columns={7} />
+            <TableSkeleton columns={6} />
           ) : filtered.length === 0 ? (
             <p className="text-muted-foreground">{strings.common.noResults}</p>
           ) : (
@@ -131,12 +125,11 @@ export function PriceListPage() {
                   <TableHead>יחידה</TableHead>
                   <TableHead>מחיר</TableHead>
                   <TableHead>{strings.common.status}</TableHead>
-                  <TableHead>{strings.common.actions}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filtered.map((i) => (
-                  <TableRow key={i.id}>
+                  <TableRow key={i.id} onClick={() => navigate(`/admin/price-list/${i.id}`)} className="cursor-pointer">
                     <TableCell>{i.code ?? "—"}</TableCell>
                     <TableCell className="font-medium">{i.name}</TableCell>
                     <TableCell>{i.category ?? "—"}</TableCell>
@@ -144,28 +137,6 @@ export function PriceListPage() {
                     <TableCell>{formatCurrency(i.unit_price)}</TableCell>
                     <TableCell>
                       {i.is_active ? <Badge variant="success">פעיל</Badge> : <Badge variant="secondary">לא פעיל</Badge>}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex gap-2">
-                        <Button variant="outline" size="sm" onClick={() => setEditing(i)}>
-                          {strings.common.edit}
-                        </Button>
-                        <Button
-                          variant="destructive"
-                          size="sm"
-                          onClick={async () => {
-                            const ok = await confirmDialog({
-                              title: "מחיקת פריט מחירון",
-                              description: `למחוק את הפריט "${i.name}"? הפעולה אינה הפיכה.`,
-                              confirmLabel: "מחק",
-                              variant: "destructive",
-                            });
-                            if (ok) remove.mutate(i.id);
-                          }}
-                        >
-                          {strings.common.delete}
-                        </Button>
-                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -178,7 +149,7 @@ export function PriceListPage() {
   );
 }
 
-interface PriceListFormProps {
+export interface PriceListFormProps {
   initial: PriceListItem | null;
   submitting: boolean;
   error: string | null;
@@ -186,7 +157,10 @@ interface PriceListFormProps {
   onSubmit: (values: PriceListItemInput) => void;
 }
 
-function PriceListForm({ initial, submitting, error, onCancel, onSubmit }: PriceListFormProps) {
+// Exported so PriceListItemDetailPage can reuse the exact same fields/
+// validation for editing an existing item — this list page only ever uses
+// it for creating a new one.
+export function PriceListForm({ initial, submitting, error, onCancel, onSubmit }: PriceListFormProps) {
   const {
     register,
     handleSubmit,
@@ -207,7 +181,12 @@ function PriceListForm({ initial, submitting, error, onCancel, onSubmit }: Price
   return (
     <Card>
       <CardContent className="p-4">
-        <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4">
+        {/* id lets PriceListItemDetailPage's fixed DetailToolbar submit this
+            form with a `form="price-list-form"` button while editing, so
+            "שמור" is reachable without scrolling all the way down here first
+            — same pattern as InspectionHeaderForm's sticky bar (see
+            ResourceCategoryDetailPage) and QuoteForm's "quote-form". */}
+        <form id="price-list-form" onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <FormField label="קוד" htmlFor="code" error={errors.code?.message}>
               <Input id="code" {...register("code")} />

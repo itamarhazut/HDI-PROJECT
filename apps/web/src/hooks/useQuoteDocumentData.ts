@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "../lib/supabase";
 import type { QuoteDocumentData } from "../components/QuoteDocumentView";
+import { useQuoteFooterText } from "./useQuoteFooterText";
 
 // Fetches a saved quote (+ its customer + line items) and shapes it into
 // the QuoteDocumentData the shared QuoteDocumentView renders. Used by both
@@ -48,22 +49,40 @@ export function useQuoteDocumentData(id: string | undefined) {
       : quote.discount
     : 0;
 
+  // Same fixed text on every quote (edited once on SettingsPage) — see
+  // useQuoteFooterText.ts.
+  const { footerText } = useQuoteFooterText();
+
   const data: QuoteDocumentData | null = quote
     ? {
         quoteNumberLabel: `#${quote.quote_number}`,
         issuedDate: quote.issued_date,
         validUntil: quote.valid_until,
         status: quote.status,
-        customerName: customer?.name ?? "",
-        customerPhone: customer?.phone,
+        // document_name is the override for what to print on a document
+        // when it should read differently from the contact name on file
+        // (e.g. a company name) — falling back to .name only when it's
+        // unset, same as every other place a customer's name reaches a
+        // document.
+        customerName: customer?.document_name ?? customer?.name ?? "",
+        customerBusinessId: customer?.business_id,
+        // Customers have two separate phone fields (a landline "phone" and
+        // a "mobile_phone") — most customer records only ever have the
+        // mobile one filled in, so preferring it (falling back to the
+        // landline) is what actually gets a number to show on the document
+        // instead of silently showing nothing.
+        customerPhone: customer?.mobile_phone || customer?.phone || null,
         customerEmail: customer?.email,
-        customerAddress: customer?.address,
+        // "address" and "city" are separate columns — combined here into
+        // one line the way a person would actually write it out.
+        customerAddress: [customer?.address, customer?.city].filter(Boolean).join(", ") || null,
         lineItems: (lineItems ?? []).map((li) => ({
           id: li.id,
           description: li.description,
           quantity: li.quantity,
           unit_price: li.unit_price,
           line_total: li.line_total,
+          hidePrice: li.hide_price ?? false,
         })),
         subtotal: quote.subtotal,
         discount: discountAmount,
@@ -74,6 +93,7 @@ export function useQuoteDocumentData(id: string | undefined) {
         taxAmount: quote.tax_amount,
         total: quote.total,
         notes: quote.notes,
+        footerText,
       }
     : null;
 

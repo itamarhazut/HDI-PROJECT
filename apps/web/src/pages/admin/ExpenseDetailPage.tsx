@@ -5,10 +5,11 @@ import {
   type Expense,
   type ExpenseInput,
   EXPENSE_CATEGORY_LABELS,
-  EXPENSE_PAYMENT_METHOD_LABELS,
+  PAYMENT_METHOD_LABELS,
   strings,
 } from "@repo/shared";
 import { Button, Card, CardContent, useConfirmDialog, useToast } from "@repo/ui";
+import { DetailToolbar } from "../../components/DetailToolbar";
 import { PageHeader } from "../../components/PageHeader";
 import { IconWallet } from "../../components/icons";
 import { getErrorMessage } from "../../lib/errors";
@@ -29,6 +30,15 @@ export function ExpenseDetailPage() {
   const confirmDialog = useConfirmDialog();
   const [editing, setEditing] = React.useState(false);
   const [downloadError, setDownloadError] = React.useState<string | null>(null);
+
+  const { data: jobs } = useQuery({
+    queryKey: ["jobs", "picker"],
+    queryFn: async () => {
+      const { data, error } = await supabase.from("jobs").select("*").order("title");
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
 
   const { data: expense, isLoading } = useQuery({
     queryKey: ["expenses", id],
@@ -55,16 +65,29 @@ export function ExpenseDetailPage() {
 
       const payload = {
         vendor: values.vendor,
+        supplier_tax_id: values.supplier_tax_id || null,
         expense_date: values.expense_date,
         amount: values.amount,
+        vat_amount: values.vat_amount ?? 0,
+        vat_deductible_rate: values.vat_deductible_rate,
         category: values.category,
         payment_method: values.payment_method || null,
+        job_id: values.job_id || null,
+        customer_id: values.customer_id || null,
         notes: values.notes || null,
         receipt_path: receiptPath,
         receipt_file_name: receiptFileName,
       };
       const { error } = await supabase.from("expenses").update(payload).eq("id", id as string);
       if (error) throw error;
+
+      // Same cleanup as DocumentsPage: swapping in a new receipt used to
+      // orphan the old one in the bucket forever. Removed only after the
+      // row is saved, so a failed save can't lose the original receipt.
+      const previousPath = expense?.receipt_path ?? null;
+      if (file && previousPath && previousPath !== receiptPath) {
+        await supabase.storage.from("documents").remove([previousPath]);
+      }
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["expenses", id] });
@@ -121,7 +144,50 @@ export function ExpenseDetailPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <BackLink />
+      <DetailToolbar>
+        <Link to="/admin/expenses" className="text-sm font-medium text-muted-foreground hover:text-foreground">
+          ‹ {strings.common.back} להוצאות
+        </Link>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {/* Pinned Cancel/Save while editing — the form's own buttons sit
+              at the bottom of the form, so without this they'd only be
+              reachable after scrolling all the way down. Save submits the
+              form by id (same pattern as InspectionHeaderForm's sticky
+              bar). */}
+          {editing && (
+            <>
+              <Button variant="outline" size="sm" onClick={() => setEditing(false)}>
+                {strings.common.cancel}
+              </Button>
+              <Button type="submit" form="expense-form" size="sm" disabled={update.isPending}>
+                {strings.common.save}
+              </Button>
+            </>
+          )}
+          {!editing && (
+            <>
+              <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
+                {strings.common.edit}
+              </Button>
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={async () => {
+                  const ok = await confirmDialog({
+                    title: "מחיקת הוצאה",
+                    description: `למחוק את ההוצאה "${expense.vendor}"? הפעולה אינה הפיכה.`,
+                    confirmLabel: "מחק",
+                    variant: "destructive",
+                  });
+                  if (ok) remove.mutate();
+                }}
+              >
+                {strings.common.delete}
+              </Button>
+            </>
+          )}
+        </div>
+      </DetailToolbar>
       <PageHeader title={expense.vendor} description="פרטי הוצאה." icon={IconWallet} color="bg-rose-500" />
 
       {downloadError && (
@@ -135,6 +201,7 @@ export function ExpenseDetailPage() {
 
       {editing ? (
         <ExpenseForm
+          jobs={jobs ?? []}
           initial={expense}
           submitting={update.isPending}
           error={update.error instanceof Error ? update.error.message : null}
@@ -150,9 +217,33 @@ export function ExpenseDetailPage() {
                 <dd className="text-sm font-medium">{formatDate(expense.expense_date)}</dd>
               </div>
               <div>
-                <dt className="text-xs text-muted-foreground">סכום</dt>
+                <dt className="text-xs text-muted-foreground">סכום כולל מע״מ</dt>
                 <dd className="text-sm font-medium">{formatCurrency(expense.amount)}</dd>
               </div>
+              <div>
+                <dt className="text-xs text-muted-foreground">מע״מ בקבלה</dt>
+                <dd className="text-sm font-medium">
+                  {expense.vat_amount ? formatCurrency(expense.vat_amount) : "—"}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs text-muted-foreground">מע״מ לקיזוז</dt>
+                <dd className="text-sm font-medium">
+                  {expense.vat_amount
+                    ? `${formatCurrency(
+                        Math.round(expense.vat_amount * Number(expense.vat_deductible_rate ?? 1) * 100) / 100
+                      )} (${Math.round(Number(expense.vat_deductible_rate ?? 1) * 100)}%)`
+                    : "—"}
+                </dd>
+              </div>
+              {expense.supplier_tax_id && (
+                <div>
+                  <dt className="text-xs text-muted-foreground">ח.פ / עוסק של הספק</dt>
+                  <dd className="text-sm font-medium" dir="ltr">
+                    {expense.supplier_tax_id}
+                  </dd>
+                </div>
+              )}
               <div>
                 <dt className="text-xs text-muted-foreground">קטגוריה</dt>
                 <dd className="text-sm font-medium">{EXPENSE_CATEGORY_LABELS[expense.category] ?? expense.category}</dd>
@@ -161,10 +252,18 @@ export function ExpenseDetailPage() {
                 <dt className="text-xs text-muted-foreground">אמצעי תשלום</dt>
                 <dd className="text-sm font-medium">
                   {expense.payment_method
-                    ? EXPENSE_PAYMENT_METHOD_LABELS[expense.payment_method] ?? expense.payment_method
+                    ? PAYMENT_METHOD_LABELS[expense.payment_method] ?? expense.payment_method
                     : "—"}
                 </dd>
               </div>
+              {expense.job_id && (
+                <div>
+                  <dt className="text-xs text-muted-foreground">עבודה מקושרת</dt>
+                  <dd className="text-sm font-medium">
+                    {(jobs ?? []).find((j) => j.id === expense.job_id)?.title ?? "—"}
+                  </dd>
+                </div>
+              )}
               <div>
                 <dt className="text-xs text-muted-foreground">קבלה מצורפת</dt>
                 <dd className="text-sm font-medium">
@@ -188,27 +287,6 @@ export function ExpenseDetailPage() {
                 <p className="whitespace-pre-wrap text-sm">{expense.notes}</p>
               </div>
             )}
-
-            <div className="flex flex-wrap gap-2 border-t border-border pt-4">
-              <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
-                {strings.common.edit}
-              </Button>
-              <Button
-                variant="destructive"
-                size="sm"
-                onClick={async () => {
-                  const ok = await confirmDialog({
-                    title: "מחיקת הוצאה",
-                    description: `למחוק את ההוצאה "${expense.vendor}"? הפעולה אינה הפיכה.`,
-                    confirmLabel: "מחק",
-                    variant: "destructive",
-                  });
-                  if (ok) remove.mutate();
-                }}
-              >
-                {strings.common.delete}
-              </Button>
-            </div>
           </CardContent>
         </Card>
       )}

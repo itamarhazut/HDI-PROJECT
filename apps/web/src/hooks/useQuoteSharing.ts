@@ -55,34 +55,45 @@ function quotePdfFileName(data: QuoteDocumentData) {
 // PDF (it doesn't have to be visible on screen; see QuoteForm for a
 // hidden-but-rendered usage).
 //
-// IMPORTANT, honest limitation: no website can jump straight into a
-// specific app (WhatsApp, Mail...) with a file already attached — only
-// the phone's own native share sheet can hand a real file to another app,
-// and only the person's own tap picks which app. So on a phone, all three
-// actions below open the exact same share sheet; the "WhatsApp"/"Email"
-// buttons only set the wording, not which app opens — same technical
-// action, different button for whichever the person usually reaches for.
-// On desktop (no such share sheet exists), each falls back to downloading
-// the PDF plus opening that channel with a text summary, so it's one
-// manual attach away from done.
+// IMPORTANT, honest limitation: no website can hand a file to another app
+// pre-attached — only the OS's own native share sheet can pass a real
+// file to another app, and it always shows every app that can receive a
+// file, not just one. So the generic "שיתוף" button intentionally opens
+// that native share sheet (or, on desktop where no such sheet exists,
+// downloads the PDF) — the person picks the destination app themselves.
+// The "WhatsApp"/"Email" buttons are different: they name a *specific*
+// app, so opening a generic share sheet for them would be misleading —
+// instead they always save/download the PDF first and then open that
+// channel directly (wa.me / mailto), skipping the share sheet entirely.
+// That channel opens for real, immediately; the file still has to be
+// attached by hand once inside it, since the direct-open link has no way
+// to carry a file along.
 export function useQuoteSharing(data: QuoteDocumentData | null) {
   const toast = useToast();
   const docRef = React.useRef<HTMLDivElement>(null);
   const [busy, setBusy] = React.useState<"share" | "whatsapp" | "email" | null>(null);
 
-  const runShare = (key: "share" | "whatsapp" | "email", afterSave: (outcome: "saved" | "downloaded") => void) =>
+  const runShare = (
+    key: "share" | "whatsapp" | "email",
+    afterSave: (outcome: "saved" | "downloaded") => void,
+    options?: { allowNativeShareSheet?: boolean }
+  ) =>
     async () => {
       if (!data) return;
       setBusy(key);
       try {
         const fileName = quotePdfFileName(data);
+        const allowNativeShareSheet = options?.allowNativeShareSheet ?? true;
 
         // Decide up front, with a cheap zero-byte probe file, whether this
         // browser can hand a real file to the native share sheet (mobile)
         // or whether we're going to need the desktop "Save As" fallback —
-        // deciding this needs no PDF content, just the name/type.
+        // deciding this needs no PDF content, just the name/type. Channel
+        // buttons (WhatsApp/Email) set allowNativeShareSheet: false so
+        // this is always false for them, even on a phone that supports
+        // native file sharing — they open their channel directly instead.
         const probeFile = new File([], fileName, { type: "application/pdf" });
-        const nativeShareLikely = canShareFiles([probeFile]);
+        const nativeShareLikely = allowNativeShareSheet && canShareFiles([probeFile]);
 
         // On the desktop fallback path, open the native "Save As" dialog
         // RIGHT NOW, before the slow PDF render below — not after. That
@@ -129,29 +140,37 @@ export function useQuoteSharing(data: QuoteDocumentData | null) {
     });
   });
 
-  const shareWhatsApp = runShare("whatsapp", (outcome) => {
-    if (data) {
-      const phone = toWhatsAppPhone(data.customerPhone);
-      window.open(`https://wa.me/${phone ?? ""}?text=${encodeURIComponent(buildShareText(data))}`, "_blank", "noopener,noreferrer");
-    }
-    toast({
-      title: outcome === "saved" ? "קובץ ה-PDF נשמר" : "קובץ ה-PDF ירד",
-      description: "וואטסאפ נפתח עם טקסט מוכן — צרפו את הקובץ שנשמר ידנית להודעה.",
-    });
-  });
+  const shareWhatsApp = runShare(
+    "whatsapp",
+    (outcome) => {
+      if (data) {
+        const phone = toWhatsAppPhone(data.customerPhone);
+        window.open(`https://wa.me/${phone ?? ""}?text=${encodeURIComponent(buildShareText(data))}`, "_blank", "noopener,noreferrer");
+      }
+      toast({
+        title: outcome === "saved" ? "קובץ ה-PDF נשמר" : "קובץ ה-PDF ירד",
+        description: "וואטסאפ נפתח עם טקסט מוכן — צרפו את הקובץ שנשמר/ירד להודעה.",
+      });
+    },
+    { allowNativeShareSheet: false }
+  );
 
-  const shareEmail = runShare("email", (outcome) => {
-    if (data) {
-      const subject = `הצעת מחיר ${data.quoteNumberLabel} - HDI Project`;
-      const body = buildShareText(data);
-      const to = data.customerEmail ?? "";
-      window.location.href = `mailto:${to}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-    }
-    toast({
-      title: outcome === "saved" ? "קובץ ה-PDF נשמר" : "קובץ ה-PDF ירד",
-      description: "תוכנת המייל נפתחה עם טקסט מוכן — צרפו את הקובץ שנשמר ידנית.",
-    });
-  });
+  const shareEmail = runShare(
+    "email",
+    (outcome) => {
+      if (data) {
+        const subject = `הצעת מחיר ${data.quoteNumberLabel} - HDI Project`;
+        const body = buildShareText(data);
+        const to = data.customerEmail ?? "";
+        window.location.href = `mailto:${to}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+      }
+      toast({
+        title: outcome === "saved" ? "קובץ ה-PDF נשמר" : "קובץ ה-PDF ירד",
+        description: "תוכנת המייל נפתחה עם טקסט מוכן — צרפו את הקובץ שנשמר/ירד ידנית.",
+      });
+    },
+    { allowNativeShareSheet: false }
+  );
 
   return { docRef, busy, shareGeneric, shareWhatsApp, shareEmail };
 }

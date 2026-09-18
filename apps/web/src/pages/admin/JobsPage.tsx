@@ -1,6 +1,7 @@
 import * as React from "react";
-import { useForm } from "react-hook-form";
+import { Controller, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
 import { jobSchema, type JobInput, type Job, type JobStatus, type Customer, strings } from "@repo/shared";
@@ -9,8 +10,9 @@ import {
   Button,
   Card,
   CardContent,
+  Combobox,
   Input,
-  Select,
+  Label,
   Table,
   TableBody,
   TableCell,
@@ -19,22 +21,39 @@ import {
   TableRow,
   TableSkeleton,
   Textarea,
-  useConfirmDialog,
   useToast,
 } from "@repo/ui";
 import { FormField } from "../../components/FormField";
 import { PageHeader } from "../../components/PageHeader";
+import { DetailToolbar } from "../../components/DetailToolbar";
 import { StatusBadge } from "../../components/StatusBadge";
+import { StatusSelect } from "../../components/StatusSelect";
 import { IconClipboardCheck } from "../../components/icons";
 import { formatDate } from "../../lib/format";
 import { getErrorMessage } from "../../lib/errors";
 import { supabase } from "../../lib/supabase";
 
+// "open" is a grouping, not a real status — it covers every job that isn't
+// finished yet (new/scheduled/in_progress), matching how the dashboard's
+// "עבודות פתוחות" stat itself is computed (see DashboardPage's openJobs
+// query). The dashboard's stat cards link here with `?status=open` /
+// `?status=completed` so clicking one lands on the matching filtered list
+// instead of just a number.
+const OPEN_JOB_STATUSES: JobStatus[] = ["new", "scheduled", "in_progress"];
+type JobStatusFilter = "all" | "open" | "completed" | "cancelled";
+
+function isJobStatusFilter(value: string | null): value is JobStatusFilter {
+  return value === "open" || value === "completed" || value === "cancelled";
+}
+
 export function JobsPage() {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const toast = useToast();
-  const confirmDialog = useConfirmDialog();
   const [editing, setEditing] = React.useState<Job | "new" | null>(null);
+  const [search, setSearch] = React.useState("");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const statusFilter: JobStatusFilter = isJobStatusFilter(searchParams.get("status")) ? (searchParams.get("status") as JobStatusFilter) : "all";
 
   const { data: jobs, isLoading } = useQuery({
     queryKey: ["jobs"],
@@ -72,6 +91,28 @@ export function JobsPage() {
     return map;
   }, [customers]);
 
+  const filteredJobs = React.useMemo(() => {
+    const all = jobs ?? [];
+    const byStatus =
+      statusFilter === "all"
+        ? all
+        : statusFilter === "open"
+          ? all.filter((j) => OPEN_JOB_STATUSES.includes(j.status))
+          : all.filter((j) => j.status === statusFilter);
+
+    // Every other list in the app has a search box; jobs was the exception,
+    // which meant finding "the Levi job on Herzl street" was manual scrolling
+    // once there were a few hundred of them. Searches the things you'd
+    // actually remember about a job: who it was for, what it was, and where.
+    const q = search.trim().toLowerCase();
+    if (!q) return byStatus;
+    return byStatus.filter((j) =>
+      [j.title, j.address, j.description, customerNameById.get(j.customer_id)].some((v) =>
+        v?.toLowerCase().includes(q)
+      )
+    );
+  }, [jobs, statusFilter, search, customerNameById]);
+
   const upsert = useMutation({
     mutationFn: async (values: JobInput & { id?: string; status?: JobStatus }) => {
       const { id, status, ...rest } = values;
@@ -82,7 +123,13 @@ export function JobsPage() {
         address: rest.address || null,
         scheduled_date: rest.scheduled_date || null,
         assigned_technician_id: rest.assigned_technician_id || null,
-        quote_id: rest.quote_id || null,
+        // Only written when the caller actually supplied it. JobForm has no
+        // quote picker, so on an edit `rest.quote_id` is undefined — and
+        // writing `undefined || null` used to null out the link to the quote
+        // a job was created from. The job then looked fine, but "צור חשבונית"
+        // on it produced an empty ₪0 invoice, because there was no quote left
+        // to copy the lines and total from.
+        ...(rest.quote_id !== undefined ? { quote_id: rest.quote_id || null } : {}),
         ...(status ? { status } : {}),
       };
       if (id) {
@@ -101,16 +148,20 @@ export function JobsPage() {
     onError: (err) => toast({ title: "שמירת העבודה נכשלה", description: getErrorMessage(err), variant: "error" }),
   });
 
-  const remove = useMutation({
+  // Quick one-click status change from the list, for the most common
+  // in-the-field action — no need to open the edit form just to flip a job
+  // to completed. jobs_stamp_completed_at (0003) stamps completed_at from
+  // this status change automatically, so there's nothing else to set here.
+  const markCompleted = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.from("jobs").delete().eq("id", id);
+      const { error } = await supabase.from("jobs").update({ status: "completed" }).eq("id", id);
       if (error) throw error;
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["jobs"] });
-      toast({ title: "העבודה נמחקה", variant: "success" });
+      toast({ title: "העבודה סומנה כהושלמה", variant: "success" });
     },
-    onError: (err) => toast({ title: "מחיקת העבודה נכשלה", description: getErrorMessage(err), variant: "error" }),
+    onError: (err) => toast({ title: "עדכון הסטטוס נכשל", description: getErrorMessage(err), variant: "error" }),
   });
 
   // "צור חשבונית" on a completed job — mirrors QuotesPage's convertToJob:
@@ -122,6 +173,17 @@ export function JobsPage() {
   const createInvoiceFromJob = useMutation({
     mutationFn: async (job: Job) => {
       let quoteTotal = 0;
+      // The rest of the quote's money breakdown, carried across with the
+      // total so the invoice is a complete document rather than a bare
+      // number that loses its VAT the first time it's edited.
+      let quoteTotals = {
+        subtotal: 0,
+        discount: 0,
+        discount_type: "fixed" as "fixed" | "percent",
+        include_vat: false,
+        tax_rate: 0,
+        tax_amount: 0,
+      };
       let quoteLineItems: { price_list_item_id: string | null; description: string; quantity: number; unit_price: number }[] = [];
 
       if (job.quote_id) {
@@ -132,6 +194,14 @@ export function JobsPage() {
           .single();
         if (quoteError) throw quoteError;
         quoteTotal = quote.total;
+        quoteTotals = {
+          subtotal: quote.subtotal ?? 0,
+          discount: quote.discount ?? 0,
+          discount_type: quote.discount_type ?? "fixed",
+          include_vat: quote.include_vat ?? false,
+          tax_rate: quote.tax_rate ?? 0,
+          tax_amount: quote.tax_amount ?? 0,
+        };
 
         const { data: lineItems, error: lineItemsError } = await supabase
           .from("quote_line_items")
@@ -148,8 +218,10 @@ export function JobsPage() {
           customer_id: job.customer_id,
           job_id: job.id,
           quote_id: job.quote_id ?? null,
+          ...quoteTotals,
           amount: quoteTotal,
           issued_date: new Date().toISOString().slice(0, 10),
+          due_date: new Date().toISOString().slice(0, 10),
         })
         .select("id")
         .single();
@@ -178,12 +250,19 @@ export function JobsPage() {
 
   return (
     <div className="flex flex-col gap-6">
+      {/* Pinned like every detail page's DetailToolbar — see QuotesPage.tsx
+          for the full reasoning. */}
+      <DetailToolbar>
+        <span className="text-sm font-medium text-muted-foreground">{strings.nav.jobs}</span>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <Button onClick={() => setEditing((c) => (c === "new" ? null : "new"))}>+ עבודה חדשה</Button>
+        </div>
+      </DetailToolbar>
       <PageHeader
         title={strings.nav.jobs}
         description="עבודות פתוחות, מתוזמנות וסגורות."
         icon={IconClipboardCheck}
         color="bg-amber-500"
-        action={<Button onClick={() => setEditing((c) => (c === "new" ? null : "new"))}>+ עבודה חדשה</Button>}
       />
 
       {editing && (
@@ -199,10 +278,36 @@ export function JobsPage() {
       )}
 
       <Card>
-        <CardContent className="p-4">
+        <CardContent className="flex flex-col gap-4 p-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <Input
+              placeholder="חיפוש לפי לקוח, כותרת או כתובת..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="max-w-sm"
+            />
+            <Label htmlFor="job-status-filter" className="shrink-0 text-sm text-muted-foreground">
+              סינון לפי סטטוס
+            </Label>
+            <StatusSelect
+              id="job-status-filter"
+              aria-label="סינון לפי סטטוס"
+              className="w-48"
+              showDot={false}
+              value={statusFilter}
+              onChange={(next) => setSearchParams(next === "all" ? {} : { status: next }, { replace: true })}
+              options={[
+                { value: "all" as const, label: "הכל" },
+                { value: "open" as const, label: "פתוחות" },
+                { value: "completed" as const, label: "הושלמו" },
+                { value: "cancelled" as const, label: "בוטלו" },
+              ]}
+            />
+          </div>
+
           {isLoading ? (
             <TableSkeleton columns={5} />
-          ) : (jobs ?? []).length === 0 ? (
+          ) : filteredJobs.length === 0 ? (
             <p className="text-muted-foreground">{strings.common.noResults}</p>
           ) : (
             <Table>
@@ -216,18 +321,36 @@ export function JobsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {(jobs ?? []).map((j) => (
+                {filteredJobs.map((j) => (
                   <TableRow key={j.id}>
-                    <TableCell className="font-medium">{j.title}</TableCell>
+                    <TableCell className="font-medium">
+                      <Link to={`/admin/jobs/${j.id}`} className="text-primary hover:underline">
+                        {j.title}
+                      </Link>
+                    </TableCell>
                     <TableCell>{customerNameById.get(j.customer_id) ?? "—"}</TableCell>
                     <TableCell>
                       <StatusBadge status={j.status} label={JOB_STATUS_LABELS[j.status] ?? j.status} />
                     </TableCell>
                     <TableCell>{formatDate(j.scheduled_date)}</TableCell>
                     <TableCell>
+                      {/* Editing and deleting a job now live on its own detail
+                          page (opened by clicking the title above) — these are
+                          the two quick actions worth doing without leaving the
+                          list: close out a job, or log what was used on it. */}
                       <div className="flex flex-wrap gap-2">
-                        <Button variant="outline" size="sm" onClick={() => setEditing(j)}>
-                          {strings.common.edit}
+                        {j.status !== "completed" && j.status !== "cancelled" && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={markCompleted.isPending}
+                            onClick={() => markCompleted.mutate(j.id)}
+                          >
+                            סיום עבודה
+                          </Button>
+                        )}
+                        <Button variant="outline" size="sm" onClick={() => navigate(`/admin/jobs/${j.id}?addMaterial=1`)}>
+                          הורדת חומר
                         </Button>
                         {j.status === "completed" &&
                           (invoicedJobIds?.has(j.id) ? (
@@ -242,21 +365,6 @@ export function JobsPage() {
                               צור חשבונית
                             </Button>
                           ))}
-                        <Button
-                          variant="destructive"
-                          size="sm"
-                          onClick={async () => {
-                            const ok = await confirmDialog({
-                              title: "מחיקת עבודה",
-                              description: `למחוק את העבודה "${j.title}"? הפעולה אינה הפיכה.`,
-                              confirmLabel: "מחק",
-                              variant: "destructive",
-                            });
-                            if (ok) remove.mutate(j.id);
-                          }}
-                        >
-                          {strings.common.delete}
-                        </Button>
                       </div>
                     </TableCell>
                   </TableRow>
@@ -270,7 +378,7 @@ export function JobsPage() {
   );
 }
 
-interface JobFormProps {
+export interface JobFormProps {
   initial: Job | null;
   customers: Customer[];
   submitting: boolean;
@@ -284,10 +392,11 @@ const jobFormSchema = jobSchema.extend({
 });
 type JobFormInput = z.infer<typeof jobFormSchema>;
 
-function JobForm({ initial, customers, submitting, error, onCancel, onSubmit }: JobFormProps) {
+export function JobForm({ initial, customers, submitting, error, onCancel, onSubmit }: JobFormProps) {
   const {
     register,
     handleSubmit,
+    control,
     formState: { errors },
   } = useForm<JobFormInput>({
     resolver: zodResolver(jobFormSchema),
@@ -305,17 +414,27 @@ function JobForm({ initial, customers, submitting, error, onCancel, onSubmit }: 
   return (
     <Card>
       <CardContent className="p-4">
-        <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4">
+        {/* id lets JobDetailPage's fixed DetailToolbar submit this form with
+            a `form="job-form"` button while editing, so "שמור" is reachable
+            without scrolling all the way down here first — same pattern as
+            InspectionHeaderForm's sticky bar (see ResourceCategoryDetailPage)
+            and QuoteForm's "quote-form". */}
+        <form id="job-form" onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <FormField label="לקוח" htmlFor="customer_id" error={errors.customer_id?.message}>
-              <Select id="customer_id" {...register("customer_id")}>
-                <option value="">בחר/י לקוח...</option>
-                {customers.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </Select>
+              <Controller
+                name="customer_id"
+                control={control}
+                render={({ field }) => (
+                  <Combobox
+                    id="customer_id"
+                    value={field.value}
+                    onChange={field.onChange}
+                    options={customers.map((c) => ({ value: c.id, label: c.name, sublabel: c.phone ?? undefined }))}
+                    placeholder="בחר/י לקוח..."
+                  />
+                )}
+              />
             </FormField>
             <FormField label="כותרת העבודה" htmlFor="title" error={errors.title?.message}>
               <Input id="title" {...register("title")} />
@@ -328,13 +447,21 @@ function JobForm({ initial, customers, submitting, error, onCancel, onSubmit }: 
             </FormField>
             {initial && (
               <FormField label={strings.common.status} htmlFor="status" error={errors.status?.message}>
-                <Select id="status" {...register("status")}>
-                  {Object.entries(JOB_STATUS_LABELS).map(([value, label]) => (
-                    <option key={value} value={value}>
-                      {label}
-                    </option>
-                  ))}
-                </Select>
+                <Controller
+                  name="status"
+                  control={control}
+                  render={({ field }) => (
+                    <StatusSelect
+                      id="status"
+                      value={field.value as JobStatus}
+                      onChange={field.onChange}
+                      options={Object.entries(JOB_STATUS_LABELS).map(([value, label]) => ({
+                        value: value as JobStatus,
+                        label,
+                      }))}
+                    />
+                  )}
+                />
               </FormField>
             )}
           </div>

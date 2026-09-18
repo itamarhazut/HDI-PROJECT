@@ -88,16 +88,6 @@ export type InventoryItem = {
   updated_at: string;
 };
 
-export type InventoryTransaction = {
-  id: string;
-  inventory_item_id: string;
-  job_id: string | null;
-  quantity_delta: number;
-  reason: InventoryReason;
-  created_at: string;
-  created_by: string | null;
-};
-
 export type PriceListItem = {
   id: string;
   code: string | null;
@@ -129,6 +119,14 @@ export type Quote = {
   tax_amount: number;
   total: number;
   notes: string | null;
+  /**
+   * @deprecated Replaced by the per-line `QuoteLineItem.hide_price` (see
+   * migration 0011) — hiding a price is now a per-row choice (masked as
+   * "****", columns stay), not a whole-quote toggle that dropped the
+   * unit-price/total columns entirely. Column kept in the DB and this type
+   * for now; the app no longer reads or writes it.
+   */
+  hide_line_prices: boolean;
   created_at: string;
   updated_at: string;
   created_by: string | null;
@@ -143,6 +141,23 @@ export type QuoteLineItem = {
   unit_price: number;
   line_total: number;
   sort_order: number;
+  /** Mask this line's own unit-price/total as "****" on the printed/PDF document — the quantity/description still show, and the quote's overall subtotal/total are unaffected. Per-line (see migration 0011), not a whole-quote setting. */
+  hide_price: boolean;
+};
+
+// One stock movement. `unit_cost` is what the part cost at the moment of
+// the movement, captured by the record_inventory_transaction RPC — job
+// costing reads it instead of the item's current cost, so a job's materials
+// figure doesn't drift as prices change.
+export type InventoryTransaction = {
+  id: string;
+  inventory_item_id: string;
+  job_id: string | null;
+  quantity_delta: number;
+  reason: InventoryReason;
+  unit_cost: number | null;
+  created_at: string;
+  created_by: string | null;
 };
 
 export type Invoice = {
@@ -152,15 +167,55 @@ export type Invoice = {
   job_id: string | null;
   quote_id: string | null;
   status: InvoiceStatus;
-  amount: number;
+  // Nullable — unlike a quote's issued_date, an invoice row can exist
+  // before it's actually issued (e.g. auto-created from a job/quote).
   issued_date: string | null;
+  // The final total owed, VAT included and discount applied — the one
+  // figure everything else (balance, revenue, the customer portal) reads.
+  amount: number;
+  // The breakdown behind `amount`, mirroring a quote's. Added because an
+  // invoice that only stored a total couldn't survive being edited: its
+  // amount was recomputed from pre-VAT line items, silently dropping the
+  // tax. Older invoices carry subtotal = amount with no VAT split, which
+  // is an honest "we don't know", not a claim that they had no VAT.
+  subtotal: number;
+  discount: number;
+  discount_type: "fixed" | "percent";
+  include_vat: boolean;
+  tax_rate: number;
+  tax_amount: number;
+  // Payment terms are immediate, so this is normally the issue date; it's
+  // a real column so a specific invoice can be given longer terms.
+  due_date: string | null;
+  // Maintained by a trigger from the invoice_payments ledger — never write
+  // it directly.
+  amount_paid: number;
   paid_date: string | null;
+  // מספר הקצאה, issued by the Tax Authority through the external invoicing
+  // system for B2B tax invoices over the threshold (₪5,000 before VAT from
+  // June 2026).
+  allocation_number: string | null;
   external_provider: string | null;
   external_reference: string | null;
   external_url: string | null;
   notes: string | null;
   created_at: string;
   updated_at: string;
+  created_by: string | null;
+};
+
+// One payment received against an invoice. A deposit and the balance are
+// two rows, so the history survives — the invoice's amount_paid, paid_date
+// and paid/unpaid status are all derived from these by a database trigger.
+export type InvoicePayment = {
+  id: string;
+  invoice_id: string;
+  paid_at: string;
+  amount: number;
+  method: PaymentMethod | null;
+  reference: string | null;
+  notes: string | null;
+  created_at: string;
   created_by: string | null;
 };
 
@@ -190,7 +245,13 @@ export type ExpenseCategory =
   | "professional_services"
   | "other";
 
-export type ExpensePaymentMethod = "cash" | "credit_card" | "bank_transfer" | "check" | "other";
+// How money moved, in either direction — used for an expense going out and
+// for a payment coming in against an invoice. One definition on purpose, so
+// the two lists can't drift apart.
+export type PaymentMethod = "cash" | "credit_card" | "bank_transfer" | "check" | "other";
+
+/** @deprecated Use PaymentMethod — kept so existing expense code stays valid. */
+export type ExpensePaymentMethod = PaymentMethod;
 
 // A business expense (חומרים, דלק, ביטוח...) — the electrician's own small
 // "רו״ח" tracker for money going OUT of the business, separate from
@@ -203,7 +264,16 @@ export type Expense = {
   expense_date: string;
   amount: number;
   category: ExpenseCategory;
-  payment_method: ExpensePaymentMethod | null;
+  payment_method: PaymentMethod | null;
+  /** Supplier's ח.פ / עוסק number, as it appears on the receipt. */
+  supplier_tax_id: string | null;
+  /** Input VAT on the receipt (מע״מ תשומות). */
+  vat_amount: number;
+  /** Fraction of that VAT the business may claim: 1 = all, 0 = none. */
+  vat_deductible_rate: number;
+  /** Optional link to what the money was spent on, for job profitability. */
+  job_id: string | null;
+  customer_id: string | null;
   receipt_path: string | null;
   receipt_file_name: string | null;
   notes: string | null;
@@ -221,6 +291,11 @@ export type DocumentRecord = {
   status: DocumentStatus;
   file_path: string | null;
   due_date: string | null;
+  /** When the underlying license/certificate/insurance policy itself
+   *  expires and needs renewing — separate from due_date, which is the
+   *  deadline to finish the paperwork task. Optional: most document types
+   *  (a one-off permit, a submitted form) never expire at all. */
+  expiry_date: string | null;
   visible_to_customer: boolean;
   notes: string | null;
   created_at: string;
@@ -359,6 +434,8 @@ export type Lead = {
   status: LeadStatus;
   notes: string | null;
   converted_customer_id: string | null;
+  /** When to reach out next — separate from created_at, which never moves. */
+  next_follow_up_date: string | null;
   created_at: string;
   updated_at: string;
   created_by: string | null;
@@ -423,6 +500,11 @@ export type Database = {
         Partial<InvoiceLineItem> & { invoice_id: string; description: string },
         Partial<InvoiceLineItem>
       >;
+      invoice_payments: Tbl<
+        InvoicePayment,
+        Partial<InvoicePayment> & { invoice_id: string; amount: number },
+        Partial<InvoicePayment>
+      >;
       expenses: Tbl<Expense, Partial<Expense> & { vendor: string }, Partial<Expense>>;
       documents: Tbl<DocumentRecord, Partial<DocumentRecord> & { title: string }, Partial<DocumentRecord>>;
       resource_categories: Tbl<ResourceCategory, Partial<ResourceCategory> & { name: string }, Partial<ResourceCategory>>;
@@ -456,6 +538,10 @@ export type Database = {
           p_reason: InventoryReason;
         };
         Returns: string;
+      };
+      respond_to_quote: {
+        Args: { p_quote_id: string; p_accept: boolean };
+        Returns: undefined;
       };
     };
   };

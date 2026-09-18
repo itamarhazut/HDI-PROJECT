@@ -1,6 +1,7 @@
 import * as React from "react";
-import { useForm } from "react-hook-form";
+import { Controller, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
 import {
@@ -8,6 +9,7 @@ import {
   type DocumentRecord,
   type Customer,
   type Job,
+  type DocumentStatus,
   DOCUMENT_STATUS_LABELS,
   strings,
 } from "@repo/shared";
@@ -15,8 +17,8 @@ import {
   Button,
   Card,
   CardContent,
+  Combobox,
   Input,
-  Select,
   Table,
   TableBody,
   TableCell,
@@ -25,24 +27,26 @@ import {
   TableRow,
   TableSkeleton,
   Textarea,
-  useConfirmDialog,
   useToast,
 } from "@repo/ui";
 import { FormField } from "../../components/FormField";
 import { PageHeader } from "../../components/PageHeader";
+import { DetailToolbar } from "../../components/DetailToolbar";
 import { StatusBadge } from "../../components/StatusBadge";
+import { StatusSelect } from "../../components/StatusSelect";
 import { IconFolder } from "../../components/icons";
 import { formatDate } from "../../lib/format";
+import { documentExpiryState } from "../../lib/documentExpiry";
 import { getErrorMessage } from "../../lib/errors";
 import { safeStorageFileName } from "../../lib/storage";
 import { supabase } from "../../lib/supabase";
 
-const documentFormSchema = documentSchema.extend({
+export const documentFormSchema = documentSchema.extend({
   status: z.enum(["needed", "in_progress", "submitted", "approved", "rejected"]).optional(),
 });
-type DocumentFormInput = z.infer<typeof documentFormSchema>;
+export type DocumentFormInput = z.infer<typeof documentFormSchema>;
 
-const DOCUMENT_TYPE_OPTIONS = [
+export const DOCUMENT_TYPE_OPTIONS = [
   { value: "other", label: "אחר" },
   { value: "connection_approval", label: "אישור חיבור חח״י" },
   { value: "safety_certificate", label: "תעודת בטיחות" },
@@ -50,12 +54,35 @@ const DOCUMENT_TYPE_OPTIONS = [
   { value: "insurance", label: "ביטוח" },
 ];
 
+export const DOCUMENT_TYPE_LABELS: Record<string, string> = Object.fromEntries(
+  DOCUMENT_TYPE_OPTIONS.map((opt) => [opt.value, opt.label])
+);
+
+// Downloading a document's file is useful straight from the list (no need
+// to open the item first just to grab the PDF), so it's shared between
+// this list page and DocumentDetailPage instead of duplicated.
+export async function downloadDocumentFile(path: string): Promise<string | null> {
+  const { data, error } = await supabase.storage.from("documents").createSignedUrl(path, 60);
+  if (error || !data) {
+    return "שגיאה בפתיחת הקובץ: " + (error?.message ?? "לא נמצא");
+  }
+  window.open(data.signedUrl, "_blank");
+  return null;
+}
+
+// The list itself only browses/creates — every row is a compact link into
+// its own page (DocumentDetailPage), which is where viewing/editing/
+// deleting a document actually happens. "הורדה" (download) stays as a quick
+// action right here in the row, since grabbing the file is the single most
+// common thing done from this list.
 export function DocumentsPage() {
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const toast = useToast();
-  const confirmDialog = useConfirmDialog();
-  const [editing, setEditing] = React.useState<DocumentRecord | "new" | null>(null);
+  const [creating, setCreating] = React.useState(false);
   const [downloadError, setDownloadError] = React.useState<string | null>(null);
+  const [search, setSearch] = React.useState("");
+  const [typeFilter, setTypeFilter] = React.useState<string>("all");
 
   const { data: documents, isLoading } = useQuery({
     queryKey: ["documents"],
@@ -90,10 +117,18 @@ export function DocumentsPage() {
     return map;
   }, [customers]);
 
-  const upsert = useMutation({
-    mutationFn: async (input: { values: DocumentFormInput; id?: string; existingFilePath: string | null; file: File | null }) => {
-      const { values, id, existingFilePath, file } = input;
-      let filePath = existingFilePath;
+  const filtered = (documents ?? []).filter((doc) => {
+    if (typeFilter !== "all" && doc.type !== typeFilter) return false;
+    const q = search.trim().toLowerCase();
+    if (!q) return true;
+    const customerName = doc.customer_id ? customerNameById.get(doc.customer_id) ?? "" : "";
+    return [doc.title, customerName].some((v) => v.toLowerCase().includes(q));
+  });
+
+  const create = useMutation({
+    mutationFn: async (input: { values: DocumentFormInput; file: File | null }) => {
+      const { values, file } = input;
+      let filePath: string | null = null;
       if (file) {
         const folder = values.customer_id || "general";
         const path = `${folder}/${Date.now()}-${safeStorageFileName(file.name)}`;
@@ -109,60 +144,44 @@ export function DocumentsPage() {
         type: rest.type,
         title: rest.title,
         due_date: rest.due_date || null,
+        expiry_date: rest.expiry_date || null,
         visible_to_customer: rest.visible_to_customer,
         notes: rest.notes || null,
         file_path: filePath,
         ...(status ? { status } : {}),
       };
-      if (id) {
-        const { error } = await supabase.from("documents").update(payload).eq("id", id);
-        if (error) throw error;
-      } else {
-        const { error } = await supabase.from("documents").insert(payload);
-        if (error) throw error;
-      }
+      const { error } = await supabase.from("documents").insert(payload);
+      if (error) throw error;
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["documents"] });
-      setEditing(null);
+      setCreating(false);
       toast({ title: "המסמך נשמר בהצלחה", variant: "success" });
     },
     onError: (err) => toast({ title: "שמירת המסמך נכשלה", description: getErrorMessage(err), variant: "error" }),
   });
 
-  const remove = useMutation({
-    mutationFn: async (doc: DocumentRecord) => {
-      if (doc.file_path) {
-        await supabase.storage.from("documents").remove([doc.file_path]);
-      }
-      const { error } = await supabase.from("documents").delete().eq("id", doc.id);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["documents"] });
-      toast({ title: "המסמך נמחק", variant: "success" });
-    },
-    onError: (err) => toast({ title: "מחיקת המסמך נכשלה", description: getErrorMessage(err), variant: "error" }),
-  });
-
   const download = async (path: string) => {
     setDownloadError(null);
-    const { data, error } = await supabase.storage.from("documents").createSignedUrl(path, 60);
-    if (error || !data) {
-      setDownloadError("שגיאה בפתיחת הקובץ: " + (error?.message ?? "לא נמצא"));
-      return;
-    }
-    window.open(data.signedUrl, "_blank");
+    const err = await downloadDocumentFile(path);
+    if (err) setDownloadError(err);
   };
 
   return (
     <div className="flex flex-col gap-6">
+      {/* Pinned like every detail page's DetailToolbar — see QuotesPage.tsx
+          for the full reasoning. */}
+      <DetailToolbar>
+        <span className="text-sm font-medium text-muted-foreground">{strings.nav.documents}</span>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <Button onClick={() => setCreating((v) => !v)}>+ מסמך חדש</Button>
+        </div>
+      </DetailToolbar>
       <PageHeader
         title={strings.nav.documents}
         description="מסמכי בירוקרטיה ותאימות — אישורים, תעודות, היתרים. ניתן לצרף קובץ ולסמן נראות ללקוח."
         icon={IconFolder}
         color="bg-orange-500"
-        action={<Button onClick={() => setEditing((c) => (c === "new" ? null : "new"))}>+ מסמך חדש</Button>}
       />
 
       {downloadError && (
@@ -174,88 +193,102 @@ export function DocumentsPage() {
         </div>
       )}
 
-      {editing && (
+      {creating && (
         <DocumentForm
-          key={editing === "new" ? "new" : editing.id}
-          initial={editing === "new" ? null : editing}
+          initial={null}
           customers={customers ?? []}
           jobs={jobs ?? []}
-          submitting={upsert.isPending}
-          error={upsert.error instanceof Error ? upsert.error.message : null}
-          onCancel={() => setEditing(null)}
-          onSubmit={(values, file) =>
-            upsert.mutate({
-              values,
-              id: editing === "new" ? undefined : editing.id,
-              existingFilePath: editing === "new" ? null : editing.file_path,
-              file,
-            })
-          }
+          submitting={create.isPending}
+          error={create.error instanceof Error ? create.error.message : null}
+          onCancel={() => setCreating(false)}
+          onSubmit={(values, file) => create.mutate({ values, file })}
         />
       )}
 
       <Card>
-        <CardContent className="p-4">
+        <CardContent className="flex flex-col gap-4 p-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <Input
+              placeholder="חיפוש לפי כותרת או לקוח..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="max-w-sm"
+            />
+            <StatusSelect
+              aria-label="סינון לפי סוג מסמך"
+              className="sm:w-56"
+              showDot={false}
+              value={typeFilter}
+              onChange={setTypeFilter}
+              options={[{ value: "all", label: "כל הסוגים" }, ...DOCUMENT_TYPE_OPTIONS]}
+            />
+          </div>
           {isLoading ? (
-            <TableSkeleton columns={7} />
-          ) : (documents ?? []).length === 0 ? (
+            <TableSkeleton columns={8} />
+          ) : filtered.length === 0 ? (
             <p className="text-muted-foreground">{strings.common.noResults}</p>
           ) : (
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>כותרת</TableHead>
+                  <TableHead>סוג</TableHead>
                   <TableHead>לקוח</TableHead>
                   <TableHead>{strings.common.status}</TableHead>
                   <TableHead>יעד</TableHead>
+                  <TableHead>תוקף</TableHead>
                   <TableHead>גלוי ללקוח</TableHead>
                   <TableHead>קובץ</TableHead>
-                  <TableHead>{strings.common.actions}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {(documents ?? []).map((doc) => (
-                  <TableRow key={doc.id}>
+                {filtered.map((doc) => {
+                  const expiry = documentExpiryState(doc.expiry_date);
+                  return (
+                  <TableRow
+                    key={doc.id}
+                    onClick={() => navigate(`/admin/documents/${doc.id}`)}
+                    className="cursor-pointer"
+                  >
                     <TableCell className="font-medium">{doc.title}</TableCell>
+                    <TableCell>{DOCUMENT_TYPE_LABELS[doc.type] ?? doc.type}</TableCell>
                     <TableCell>{doc.customer_id ? customerNameById.get(doc.customer_id) ?? "—" : "—"}</TableCell>
                     <TableCell>
                       <StatusBadge status={doc.status} label={DOCUMENT_STATUS_LABELS[doc.status] ?? doc.status} />
                     </TableCell>
                     <TableCell>{formatDate(doc.due_date)}</TableCell>
+                    <TableCell>
+                      {expiry.state === "none" ? (
+                        "—"
+                      ) : expiry.state === "valid" ? (
+                        formatDate(doc.expiry_date)
+                      ) : (
+                        <StatusBadge status={expiry.badgeStatus} label={expiry.label} />
+                      )}
+                    </TableCell>
                     <TableCell>{doc.visible_to_customer ? "כן" : "לא"}</TableCell>
                     <TableCell>
+                      {/* stopPropagation — the row itself now navigates to
+                          the document's page on click, but downloading the
+                          file is a quick action that should stay right
+                          here instead of also opening that page. */}
                       {doc.file_path ? (
-                        <button className="text-primary underline" onClick={() => void download(doc.file_path as string)}>
+                        <button
+                          className="text-primary underline"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void download(doc.file_path as string);
+                          }}
+                        >
                           הורדה
                         </button>
                       ) : (
                         "—"
                       )}
                     </TableCell>
-                    <TableCell>
-                      <div className="flex gap-2">
-                        <Button variant="outline" size="sm" onClick={() => setEditing(doc)}>
-                          {strings.common.edit}
-                        </Button>
-                        <Button
-                          variant="destructive"
-                          size="sm"
-                          onClick={async () => {
-                            const ok = await confirmDialog({
-                              title: "מחיקת מסמך",
-                              description: `למחוק את המסמך "${doc.title}"? הפעולה אינה הפיכה.`,
-                              confirmLabel: "מחק",
-                              variant: "destructive",
-                            });
-                            if (ok) remove.mutate(doc);
-                          }}
-                        >
-                          {strings.common.delete}
-                        </Button>
-                      </div>
-                    </TableCell>
                   </TableRow>
-                ))}
+                  );
+                })}
               </TableBody>
             </Table>
           )}
@@ -265,7 +298,7 @@ export function DocumentsPage() {
   );
 }
 
-interface DocumentFormProps {
+export interface DocumentFormProps {
   initial: DocumentRecord | null;
   customers: Customer[];
   jobs: Job[];
@@ -275,11 +308,23 @@ interface DocumentFormProps {
   onSubmit: (values: DocumentFormInput, file: File | null) => void;
 }
 
-function DocumentForm({ initial, customers, jobs, submitting, error, onCancel, onSubmit }: DocumentFormProps) {
+// Exported so DocumentDetailPage can reuse the exact same fields/validation
+// for editing an existing document — this list page only ever uses it for
+// creating a new one.
+export function DocumentForm({ initial, customers, jobs, submitting, error, onCancel, onSubmit }: DocumentFormProps) {
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+  // The native <input type="file"> renders as the browser's own square,
+  // unstyled button — out of place next to the rest of the kit's rounded
+  // controls. Kept in the DOM (hidden, not removed) so the existing
+  // fileInputRef-based "read the file at submit time" flow needs no
+  // change; a styled Button triggers its click(), and this just mirrors
+  // the chosen name back for a visual confirmation the native control
+  // would otherwise have shown on its own.
+  const [fileName, setFileName] = React.useState<string | null>(null);
   const {
     register,
     handleSubmit,
+    control,
     formState: { errors },
   } = useForm<DocumentFormInput>({
     resolver: zodResolver(documentFormSchema),
@@ -289,6 +334,7 @@ function DocumentForm({ initial, customers, jobs, submitting, error, onCancel, o
       type: initial?.type ?? "other",
       title: initial?.title ?? "",
       due_date: initial?.due_date ?? "",
+      expiry_date: initial?.expiry_date ?? "",
       visible_to_customer: initial?.visible_to_customer ?? false,
       notes: initial?.notes ?? "",
       status: initial?.status ?? "needed",
@@ -303,58 +349,111 @@ function DocumentForm({ initial, customers, jobs, submitting, error, onCancel, o
   return (
     <Card>
       <CardContent className="p-4">
-        <form onSubmit={handleSubmit(submit)} className="flex flex-col gap-4">
+        {/* id lets DocumentDetailPage's fixed DetailToolbar submit this form
+            with a `form="document-form"` button while editing, so "שמור" is
+            reachable without scrolling all the way down here first — same
+            pattern as InspectionHeaderForm's sticky bar (see
+            ResourceCategoryDetailPage) and QuoteForm's "quote-form". */}
+        <form id="document-form" onSubmit={handleSubmit(submit)} className="flex flex-col gap-4">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <FormField label="כותרת" htmlFor="title" error={errors.title?.message}>
               <Input id="title" {...register("title")} />
             </FormField>
             <FormField label="סוג מסמך" htmlFor="type" error={errors.type?.message}>
-              <Select id="type" {...register("type")}>
-                {DOCUMENT_TYPE_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </Select>
+              <Controller
+                name="type"
+                control={control}
+                render={({ field }) => (
+                  <StatusSelect
+                    id="type"
+                    showDot={false}
+                    value={field.value}
+                    onChange={field.onChange}
+                    options={DOCUMENT_TYPE_OPTIONS.map((opt) => ({
+                      value: opt.value as DocumentFormInput["type"],
+                      label: opt.label,
+                    }))}
+                  />
+                )}
+              />
             </FormField>
             <FormField label="לקוח (אופציונלי)" htmlFor="customer_id" error={errors.customer_id?.message}>
-              <Select id="customer_id" {...register("customer_id")}>
-                <option value="">ללא</option>
-                {customers.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </Select>
+              <Controller
+                name="customer_id"
+                control={control}
+                render={({ field }) => (
+                  <Combobox
+                    id="customer_id"
+                    value={field.value ?? ""}
+                    onChange={field.onChange}
+                    options={customers.map((c) => ({ value: c.id, label: c.name, sublabel: c.phone ?? undefined }))}
+                    placeholder="בחר/י לקוח..."
+                    emptyOptionLabel="ללא"
+                  />
+                )}
+              />
             </FormField>
             <FormField label="עבודה (אופציונלי)" htmlFor="job_id" error={errors.job_id?.message}>
-              <Select id="job_id" {...register("job_id")}>
-                <option value="">ללא</option>
-                {jobs.map((j) => (
-                  <option key={j.id} value={j.id}>
-                    {j.title}
-                  </option>
-                ))}
-              </Select>
+              <Controller
+                name="job_id"
+                control={control}
+                render={({ field }) => (
+                  <Combobox
+                    id="job_id"
+                    value={field.value ?? ""}
+                    onChange={field.onChange}
+                    options={jobs.map((j) => ({ value: j.id, label: j.title }))}
+                    placeholder="בחר/י עבודה..."
+                    emptyOptionLabel="ללא"
+                  />
+                )}
+              />
             </FormField>
             <FormField label="יעד להשלמה" htmlFor="due_date" error={errors.due_date?.message}>
               <Input id="due_date" type="date" {...register("due_date")} />
             </FormField>
+            {/* When the document itself (not the task of getting it) expires
+                and needs renewing — a license, an insurance policy, a
+                safety certificate. Separate from due_date above, and
+                optional, since most document types never expire. */}
+            <FormField label="תוקף / תאריך פקיעה (אופציונלי)" htmlFor="expiry_date" error={errors.expiry_date?.message}>
+              <Input id="expiry_date" type="date" {...register("expiry_date")} />
+            </FormField>
             {initial && (
               <FormField label={strings.common.status} htmlFor="status" error={errors.status?.message}>
-                <Select id="status" {...register("status")}>
-                  {Object.entries(DOCUMENT_STATUS_LABELS).map(([value, label]) => (
-                    <option key={value} value={value}>
-                      {label}
-                    </option>
-                  ))}
-                </Select>
+                <Controller
+                  name="status"
+                  control={control}
+                  render={({ field }) => (
+                    <StatusSelect
+                      id="status"
+                      value={field.value as DocumentStatus}
+                      onChange={field.onChange}
+                      options={Object.entries(DOCUMENT_STATUS_LABELS).map(([value, label]) => ({
+                        value: value as DocumentStatus,
+                        label,
+                      }))}
+                    />
+                  )}
+                />
               </FormField>
             )}
           </div>
 
           <FormField label="קובץ מצורף" htmlFor="file">
-            <input ref={fileInputRef} id="file" type="file" className="text-sm" />
+            <div className="flex items-center gap-2">
+              <Button type="button" variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
+                בחירת קובץ
+              </Button>
+              <span className="truncate text-sm text-muted-foreground">{fileName ?? "לא נבחר קובץ"}</span>
+              <input
+                ref={fileInputRef}
+                id="file"
+                type="file"
+                className="hidden"
+                onChange={(e) => setFileName(e.target.files?.[0]?.name ?? null)}
+              />
+            </div>
             {initial?.file_path && <p className="mt-1 text-xs text-muted-foreground">קיים כבר קובץ מצורף — בחירת קובץ חדש תחליף אותו.</p>}
           </FormField>
 

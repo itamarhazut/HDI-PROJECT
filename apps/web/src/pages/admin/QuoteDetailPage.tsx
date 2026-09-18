@@ -1,11 +1,11 @@
 import * as React from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
 import {
   quoteSchema,
   type Quote,
-  DEFAULT_VAT_RATE,
+  type QuoteStatus,
   QUOTE_STATUS_LABELS,
   strings,
 } from "@repo/shared";
@@ -22,19 +22,30 @@ import {
   useConfirmDialog,
   useToast,
 } from "@repo/ui";
+import { DetailToolbar } from "../../components/DetailToolbar";
+import { InvoiceViewModal } from "../../components/InvoiceViewModal";
 import { PageHeader } from "../../components/PageHeader";
+import { QuoteDocumentView } from "../../components/QuoteDocumentView";
 import { StatusBadge } from "../../components/StatusBadge";
-import { IconFileText } from "../../components/icons";
+import { StatusSelect } from "../../components/StatusSelect";
+import { IconFileText, IconShare, IconWhatsApp } from "../../components/icons";
 import { QuoteViewModal } from "../../components/QuoteViewModal";
 import { getErrorMessage } from "../../lib/errors";
 import { formatCurrency, formatDate } from "../../lib/format";
 import { supabase } from "../../lib/supabase";
+import { useQuoteDocumentData } from "../../hooks/useQuoteDocumentData";
+import { useQuoteSharing } from "../../hooks/useQuoteSharing";
+import { useVatRate } from "../../hooks/useVatRate";
 import { QuoteForm } from "./QuotesPage";
 
-const quoteFormSchema = quoteSchema.extend({
+// Only used for its inferred type below (no runtime .parse()/.safeParse()
+// call in this file) — prefixed with `_` so eslint's no-unused-vars (which
+// only sees the `typeof` type-position reference, not a value use) doesn't
+// flag it.
+const _quoteFormSchema = quoteSchema.extend({
   status: z.enum(["draft", "sent", "accepted", "rejected", "expired"]).optional(),
 });
-type QuoteFormInput = z.infer<typeof quoteFormSchema>;
+type QuoteFormInput = z.infer<typeof _quoteFormSchema>;
 
 // The "quote card" you land on after clicking a row in QuotesPage —
 // viewing all the details, editing, printing/sharing, turning it into a
@@ -47,8 +58,28 @@ export function QuoteDetailPage() {
   const queryClient = useQueryClient();
   const toast = useToast();
   const confirmDialog = useConfirmDialog();
-  const [editing, setEditing] = React.useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
+  // "שכפול" below lands here with ?edit=1 so the copy opens straight in the
+  // edit form instead of a read view the person then has to open manually —
+  // the whole point of duplicating is to tweak something before it's real.
+  const [editing, setEditing] = React.useState(() => searchParams.get("edit") === "1");
+  const [editPreviewOpen, setEditPreviewOpen] = React.useState(false);
+  React.useEffect(() => {
+    if (searchParams.get("edit") === "1") {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.delete("edit");
+          return next;
+        },
+        { replace: true }
+      );
+    }
+    // Only ever meant to run once, off the URL this page was opened with.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [viewingPdf, setViewingPdf] = React.useState(false);
+  const [viewingInvoiceId, setViewingInvoiceId] = React.useState<string | null>(null);
 
   const { data: quote, isLoading } = useQuery({
     queryKey: ["quotes", id],
@@ -87,14 +118,9 @@ export function QuoteDetailPage() {
     },
   });
 
-  const { data: vatRate } = useQuery({
-    queryKey: ["app_settings", "vat_rate"],
-    queryFn: async () => {
-      const { data, error } = await supabase.from("app_settings").select("*").eq("key", "vat_rate").maybeSingle();
-      if (error) throw error;
-      return typeof data?.value === "number" ? data.value : DEFAULT_VAT_RATE;
-    },
-  });
+  // Shared hook (see useVatRate.ts) — same rate the quote form and its PDF
+  // use, so re-saving a quote here can't change its VAT out from under it.
+  const { vatRate } = useVatRate();
 
   const { data: lineItems, isFetching: loadingLineItems } = useQuery({
     queryKey: ["quote_line_items", id],
@@ -110,19 +136,6 @@ export function QuoteDetailPage() {
     },
   });
 
-  // Just enough of each invoice to know which quotes already have one — so
-  // "צור חשבונית" below doesn't offer to create a second invoice for the
-  // same quote by mistake. Mirrors JobsPage's invoicedJobIds, keyed by
-  // quote_id instead of job_id.
-  const { data: invoicedQuoteIds } = useQuery({
-    queryKey: ["invoices", "quote_ids"],
-    queryFn: async () => {
-      const { data, error } = await supabase.from("invoices").select("quote_id").not("quote_id", "is", null);
-      if (error) throw error;
-      return new Set((data ?? []).map((row) => row.quote_id as string));
-    },
-  });
-
   const customerNameById = React.useMemo(() => {
     const map = new Map<string, string>();
     (customers ?? []).forEach((c) => map.set(c.id, c.name));
@@ -133,11 +146,31 @@ export function QuoteDetailPage() {
   // reverse lookup: a job links back to the quote it came from via
   // job.quote_id, which is different from quote.job_id (a quote can be
   // pre-linked to an existing job before any job was created from it).
+  // Marking a quote "accepted" auto-creates this job (see changeStatus
+  // below), so by the time an invoice can be issued it should already
+  // exist — this is just where "צור חשבונית" looks it up to link the two.
   const linkedJob = React.useMemo(() => (jobs ?? []).find((j) => j.quote_id === quote?.id), [jobs, quote?.id]);
+
+  // Just enough to know whether this quote already has an invoice, so
+  // "הנפקת חשבונית" opens the existing one instead of creating a second
+  // one every time it's clicked.
+  const { data: existingInvoiceId } = useQuery({
+    queryKey: ["invoices", "by_quote", quote?.id],
+    enabled: !!quote?.id,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("invoices")
+        .select("id")
+        .eq("quote_id", quote?.id as string)
+        .maybeSingle();
+      if (error) throw error;
+      return data?.id ?? null;
+    },
+  });
 
   const update = useMutation({
     mutationFn: async (values: QuoteFormInput) => {
-      const rate = vatRate ?? DEFAULT_VAT_RATE;
+      const rate = vatRate;
       const subtotal = values.line_items.reduce((sum, li) => sum + li.quantity * li.unit_price, 0);
       const discountAmount = values.discount_type === "percent" ? (subtotal * values.discount) / 100 : values.discount;
       const taxable = Math.max(0, subtotal - discountAmount);
@@ -147,7 +180,10 @@ export function QuoteDetailPage() {
       const quotePayload = {
         customer_id: values.customer_id,
         job_id: values.job_id || null,
-        issued_date: values.issued_date || null,
+        // quotes.issued_date is NOT NULL in the DB (defaults to today) — a
+        // cleared field falls back to today rather than sending null, which
+        // the column would reject.
+        issued_date: values.issued_date || new Date().toISOString().slice(0, 10),
         valid_until: values.valid_until || null,
         discount: values.discount,
         discount_type: values.discount_type,
@@ -173,6 +209,7 @@ export function QuoteDetailPage() {
         unit_price: li.unit_price,
         line_total: li.quantity * li.unit_price,
         sort_order: index,
+        hide_price: li.hide_price ?? false,
       }));
       const { error: insError } = await supabase.from("quote_line_items").insert(lineItemRows);
       if (insError) throw insError;
@@ -200,28 +237,110 @@ export function QuoteDetailPage() {
     onError: (err) => toast({ title: "מחיקת הצעת המחיר נכשלה", description: getErrorMessage(err), variant: "error" }),
   });
 
-  const convertToJob = useMutation({
-    mutationFn: async (q: Quote) => {
-      const { error } = await supabase.from("jobs").insert({
-        customer_id: q.customer_id,
-        quote_id: q.id,
-        title: `עבודה עבור הצעת מחיר #${q.quote_number}`,
-        status: "new",
-      });
+  // "שכפול" — a new draft quote with the same customer, line items,
+  // discount and notes, so a repeat job or a quote a customer asked to be
+  // revised doesn't mean retyping every line from scratch. Deliberately
+  // starts clean on the parts that describe *this* quote's own history
+  // rather than the work itself: status back to draft, issued_date reset to
+  // today, valid_until cleared (a copied date could already be in the
+  // past). Totals are recomputed from the copied line items against the
+  // *current* VAT rate/setting rather than copied verbatim, in case either
+  // changed since the original was made — same math as the create/update
+  // mutations above.
+  const duplicate = useMutation({
+    mutationFn: async () => {
+      if (!quote) throw new Error("Quote not loaded");
+      const rate = vatRate;
+      const rows = lineItems ?? [];
+      const subtotal = rows.reduce((sum, li) => sum + li.quantity * li.unit_price, 0);
+      const discountAmount = quote.discount_type === "percent" ? (subtotal * quote.discount) / 100 : quote.discount;
+      const taxable = Math.max(0, subtotal - discountAmount);
+      const taxAmount = quote.include_vat ? taxable * rate : 0;
+      const total = taxable + taxAmount;
+
+      const quotePayload = {
+        customer_id: quote.customer_id,
+        job_id: quote.job_id,
+        status: "draft" as const,
+        issued_date: new Date().toISOString().slice(0, 10),
+        valid_until: null,
+        discount: quote.discount,
+        discount_type: quote.discount_type,
+        include_vat: quote.include_vat,
+        notes: quote.notes,
+        subtotal,
+        tax_rate: rate,
+        tax_amount: taxAmount,
+        total,
+      };
+      const { data, error } = await supabase.from("quotes").insert(quotePayload).select("id").single();
       if (error) throw error;
+
+      const lineItemRows = rows.map((li, index) => ({
+        quote_id: data.id as string,
+        price_list_item_id: li.price_list_item_id,
+        description: li.description,
+        quantity: li.quantity,
+        unit_price: li.unit_price,
+        line_total: li.quantity * li.unit_price,
+        sort_order: index,
+        hide_price: li.hide_price ?? false,
+      }));
+      if (lineItemRows.length > 0) {
+        const { error: insError } = await supabase.from("quote_line_items").insert(lineItemRows);
+        if (insError) throw insError;
+      }
+      return data.id as string;
     },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["jobs"] });
-      toast({ title: "נוצרה עבודה חדשה מהצעת המחיר", variant: "success" });
+    onSuccess: (newId) => {
+      void queryClient.invalidateQueries({ queryKey: ["quotes"] });
+      toast({ title: "הצעת המחיר שוכפלה", variant: "success" });
+      navigate(`/admin/quotes/${newId}?edit=1`);
     },
-    onError: (err) => toast({ title: "יצירת העבודה נכשלה", description: getErrorMessage(err), variant: "error" }),
+    onError: (err) => toast({ title: "השכפול נכשל", description: getErrorMessage(err), variant: "error" }),
   });
 
-  // "צור חשבונית" — the actual point of this correction: issuing an
-  // invoice to the customer once the job for this quote is done, from the
-  // quote itself. Reuses the line items already loaded for this page
-  // (no need to refetch quote_line_items, unlike JobsPage's version which
-  // starts from a job and has to go fetch the quote first).
+  // Quick status change from the toolbar — deliberately separate from the
+  // edit form (which used to have its own status field): changing where a
+  // quote stands in the pipeline and editing its actual content are two
+  // different actions, and this one is reachable without opening the form
+  // at all. Saves immediately on selection, no separate save step.
+  // Marking a quote "accepted" is what actually starts the job — no
+  // separate "הפוך לעבודה" button: this creates one automatically, unless
+  // this quote already has one (so toggling the status away and back
+  // doesn't create a second job).
+  const changeStatus = useMutation({
+    mutationFn: async (status: QuoteStatus) => {
+      const { error } = await supabase.from("quotes").update({ status }).eq("id", id as string);
+      if (error) throw error;
+
+      if (status === "accepted" && quote && !linkedJob) {
+        const { error: jobError } = await supabase.from("jobs").insert({
+          customer_id: quote.customer_id,
+          quote_id: quote.id,
+          title: `עבודה עבור הצעת מחיר #${quote.quote_number}`,
+          status: "new",
+        });
+        if (jobError) throw jobError;
+      }
+    },
+    onSuccess: (_data, status) => {
+      void queryClient.invalidateQueries({ queryKey: ["quotes", id] });
+      void queryClient.invalidateQueries({ queryKey: ["quotes"] });
+      if (status === "accepted") {
+        void queryClient.invalidateQueries({ queryKey: ["jobs"] });
+      }
+      toast({ title: "הסטטוס עודכן", variant: "success" });
+    },
+    onError: (err) => toast({ title: "עדכון הסטטוס נכשל", description: getErrorMessage(err), variant: "error" }),
+  });
+
+  // "הנפקת חשבונית" — issuing an invoice to the customer straight from the
+  // accepted quote, exactly like a quote is issued: create it, then open
+  // the same kind of view/print/share modal a quote gets. Reuses the line
+  // items already loaded for this page (no need to refetch
+  // quote_line_items). If this quote already has an invoice, the toolbar
+  // button skips straight to viewing it instead of calling this again.
   const createInvoiceFromQuote = useMutation({
     mutationFn: async (q: Quote) => {
       const { data: invoice, error: invoiceError } = await supabase
@@ -230,8 +349,20 @@ export function QuoteDetailPage() {
           customer_id: q.customer_id,
           job_id: linkedJob?.id ?? null,
           quote_id: q.id,
+          // The whole money breakdown comes across, not just the total.
+          // Copying only the total was what left the invoice unable to
+          // survive an edit: its line items are pre-VAT, so re-saving
+          // recomputed the total from them and dropped the tax.
+          subtotal: q.subtotal,
+          discount: q.discount ?? 0,
+          discount_type: q.discount_type ?? "fixed",
+          include_vat: q.include_vat ?? false,
+          tax_rate: q.tax_rate,
+          tax_amount: q.tax_amount ?? 0,
           amount: q.total,
           issued_date: new Date().toISOString().slice(0, 10),
+          // Immediate payment terms.
+          due_date: new Date().toISOString().slice(0, 10),
         })
         .select("id")
         .single();
@@ -250,20 +381,26 @@ export function QuoteDetailPage() {
         const { error: insError } = await supabase.from("invoice_line_items").insert(rows);
         if (insError) throw insError;
       }
+      return invoice.id as string;
     },
-    onSuccess: () => {
+    onSuccess: (invoiceId) => {
       void queryClient.invalidateQueries({ queryKey: ["invoices"] });
+      void queryClient.invalidateQueries({ queryKey: ["invoices", "by_quote", quote?.id] });
       toast({ title: "נוצרה חשבונית מהצעת המחיר", variant: "success" });
+      setViewingInvoiceId(invoiceId);
     },
     onError: (err) => toast({ title: "יצירת החשבונית נכשלה", description: getErrorMessage(err), variant: "error" }),
   });
 
-  const canCreateInvoice = Boolean(
-    quote &&
-      quote.status === "accepted" &&
-      linkedJob?.status === "completed" &&
-      !invoicedQuoteIds?.has(quote.id)
-  );
+  // Sharing lives in the toolbar now, next to עריכה/צפייה/מחיקה, instead of
+  // inside the "צפייה / PDF" modal — reachable in one click without
+  // opening anything first. Fetches its own copy of the document data
+  // (same hook the view modal itself used to use internally) and renders
+  // it off-screen purely so there's something to rasterize into the
+  // shared PDF; mirrors the identical pattern in QuotesPage's QuoteForm
+  // (live-editing screen).
+  const { data: shareDocumentData } = useQuoteDocumentData(quote?.id);
+  const sharing = useQuoteSharing(shareDocumentData ?? null);
 
   const formReady = !loadingLineItems;
 
@@ -287,7 +424,128 @@ export function QuoteDetailPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <BackLink />
+      <DetailToolbar>
+        <Link to="/admin/quotes" className="text-sm font-medium text-muted-foreground hover:text-foreground">
+          ‹ {strings.common.back} להצעות מחיר
+        </Link>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {/* While editing, the form's own Save/Cancel/Preview sit at the
+              bottom of a potentially long form (many line items) — reaching
+              them meant scrolling all the way down every time. Pinning the
+              same three actions here too (Save submits the form by id, same
+              pattern as InspectionHeaderForm's sticky bar) means they're
+              reachable the instant editing starts, without removing the
+              in-form buttons that QuotesPage's "create new" usage still
+              needs. */}
+          {editing && (
+            <>
+              <Button variant="outline" size="sm" onClick={() => setEditPreviewOpen(true)}>
+                תצוגה מקדימה
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setEditing(false)}>
+                {strings.common.cancel}
+              </Button>
+              <Button type="submit" form="quote-form" size="sm" disabled={update.isPending}>
+                שמור שינויים
+              </Button>
+            </>
+          )}
+          {!editing && (
+            <>
+              <StatusSelect
+                aria-label={strings.common.status}
+                value={quote.status}
+                disabled={changeStatus.isPending}
+                onChange={(status) => changeStatus.mutate(status)}
+                options={Object.entries(QUOTE_STATUS_LABELS)
+                  // "פגה תוקף" removed from the choices — not a status
+                  // anyone picks going forward. Left out of the options
+                  // list only, not the underlying type/label map, so any
+                  // older quote that already has this status still shows
+                  // its badge correctly.
+                  .filter(([value]) => value !== "expired")
+                  .map(([value, label]) => ({
+                    value: value as QuoteStatus,
+                    label,
+                  }))}
+              />
+              <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
+                {strings.common.edit}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={!formReady || duplicate.isPending}
+                onClick={() => duplicate.mutate()}
+              >
+                {duplicate.isPending ? "משכפל..." : "שכפול"}
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setViewingPdf(true)}>
+                צפייה / PDF
+              </Button>
+              {/* Icon-only, no label — just the two channels that matter
+                  day to day (a generic share sheet, and WhatsApp
+                  specifically). "שיתוף במייל" was dropped rather than made
+                  icon-only: it's the same underlying action as "שיתוף" on
+                  desktop (no native share sheet → falls back to a PDF
+                  download either way), so it wasn't earning its own button. */}
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-9 px-0"
+                aria-label="שיתוף"
+                title={sharing.busy === "share" ? "משתף..." : "שיתוף"}
+                onClick={sharing.shareGeneric}
+                disabled={!shareDocumentData || sharing.busy !== null}
+              >
+                <IconShare className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-9 px-0"
+                aria-label="שיתוף בוואטסאפ"
+                title={sharing.busy === "whatsapp" ? "משתף..." : "שיתוף בוואטסאפ"}
+                onClick={sharing.shareWhatsApp}
+                disabled={!shareDocumentData || sharing.busy !== null}
+              >
+                <IconWhatsApp className="h-4 w-4" />
+              </Button>
+              {quote.status === "accepted" && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={createInvoiceFromQuote.isPending}
+                  onClick={() => {
+                    if (existingInvoiceId) {
+                      setViewingInvoiceId(existingInvoiceId);
+                    } else {
+                      createInvoiceFromQuote.mutate(quote);
+                    }
+                  }}
+                >
+                  {existingInvoiceId ? "צפייה בחשבונית" : "הנפקת חשבונית"}
+                </Button>
+              )}
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={async () => {
+                  const ok = await confirmDialog({
+                    title: "מחיקת הצעת מחיר",
+                    description: `למחוק את הצעת המחיר #${quote.quote_number}? הפעולה אינה הפיכה.`,
+                    confirmLabel: "מחק",
+                    variant: "destructive",
+                  });
+                  if (ok) remove.mutate();
+                }}
+              >
+                {strings.common.delete}
+              </Button>
+            </>
+          )}
+        </div>
+      </DetailToolbar>
       <PageHeader
         title={`הצעת מחיר #${quote.quote_number}`}
         description="כל הפרטים של הצעת המחיר."
@@ -306,6 +564,8 @@ export function QuoteDetailPage() {
           error={update.error instanceof Error ? update.error.message : null}
           onCancel={() => setEditing(false)}
           onSubmit={(values) => update.mutate(values)}
+          previewOpen={editPreviewOpen}
+          onPreviewOpenChange={setEditPreviewOpen}
         />
       )}
       {editing && !formReady && (
@@ -385,59 +645,37 @@ export function QuoteDetailPage() {
                 <p className="whitespace-pre-wrap text-sm">{quote.notes}</p>
               </div>
             )}
-
-            <div className="flex flex-wrap gap-2 border-t border-border pt-4">
-              <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
-                {strings.common.edit}
-              </Button>
-              <Button variant="outline" size="sm" onClick={() => setViewingPdf(true)}>
-                צפייה / PDF
-              </Button>
-              {quote.status === "accepted" && (
-                <Button variant="secondary" size="sm" onClick={() => convertToJob.mutate(quote)}>
-                  הפוך לעבודה
-                </Button>
-              )}
-              {canCreateInvoice && (
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  disabled={createInvoiceFromQuote.isPending}
-                  onClick={() => createInvoiceFromQuote.mutate(quote)}
-                >
-                  צור חשבונית
-                </Button>
-              )}
-              {quote.status === "accepted" && linkedJob?.status === "completed" && invoicedQuoteIds?.has(quote.id) && (
-                <span className="self-center text-sm text-muted-foreground">יש חשבונית ✓</span>
-              )}
-              <Button
-                variant="destructive"
-                size="sm"
-                onClick={async () => {
-                  const ok = await confirmDialog({
-                    title: "מחיקת הצעת מחיר",
-                    description: `למחוק את הצעת המחיר #${quote.quote_number}? הפעולה אינה הפיכה.`,
-                    confirmLabel: "מחק",
-                    variant: "destructive",
-                  });
-                  if (ok) remove.mutate();
-                }}
-              >
-                {strings.common.delete}
-              </Button>
-            </div>
           </CardContent>
         </Card>
       )}
 
       {viewingPdf && (
-        <QuoteViewModal
-          quoteId={quote.id}
-          onClose={() => setViewingPdf(false)}
-          printBasePath="/admin/quotes"
-          allowShare
+        <QuoteViewModal quoteId={quote.id} onClose={() => setViewingPdf(false)} printBasePath="/admin/quotes" />
+      )}
+
+      {viewingInvoiceId && (
+        <InvoiceViewModal
+          invoiceId={viewingInvoiceId}
+          onClose={() => setViewingInvoiceId(null)}
+          printBasePath="/admin/invoices"
         />
+      )}
+
+      {/* Rendered off-screen purely so the toolbar's share buttons above
+          have something to rasterize into a PDF — see QuotesPage's
+          QuoteForm for the identical pattern used while live-editing. */}
+      {shareDocumentData && (
+        // Explicit width — see the identical comment in QuotesPage.tsx's
+        // QuoteForm next to the same pattern: without it, a short quote's
+        // hidden PDF-source div can shrink-wrap narrower than
+        // QuoteDocumentView's own max-w-3xl, which throws off
+        // elementToPdfBlob's page-height budget and can force even a
+        // short quote onto two pages.
+        <div style={{ position: "fixed", top: 0, left: "-9999px", width: "48rem", pointerEvents: "none" }} aria-hidden="true">
+          <div ref={sharing.docRef}>
+            <QuoteDocumentView data={shareDocumentData} fillPage />
+          </div>
+        </div>
       )}
     </div>
   );

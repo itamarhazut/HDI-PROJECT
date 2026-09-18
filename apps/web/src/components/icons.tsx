@@ -206,3 +206,75 @@ export function IconSettings(props: IconProps) {
     </svg>
   );
 }
+
+// Generic "share" glyph — three connected nodes, the familiar
+// Android/iOS "share" pictogram. Used alone on the neutral "שיתוף"
+// button, and paired with a channel icon (WhatsApp/mail, below) on the
+// channel-specific buttons so those also read at a glance as sharing
+// actions, not just "open WhatsApp"/"open mail".
+export function IconShare(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <circle cx="18" cy="5" r="3" fill="currentColor" fillOpacity="0.25" />
+      <circle cx="6" cy="12" r="3" fill="currentColor" fillOpacity="0.25" />
+      <circle cx="18" cy="19" r="3" fill="currentColor" fillOpacity="0.25" />
+      <line x1="8.6" y1="10.6" x2="15.4" y2="6.6" />
+      <line x1="8.6" y1="13.4" x2="15.4" y2="17.4" />
+    </svg>
+  );
+}
+
+// A speech-bubble glyph (own hand-drawn duotone style, not a
+// reproduction of any official brand artwork) marking the "share via
+// WhatsApp" action.
+export function IconWhatsApp(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M12 3a9 9 0 0 0-7.8 13.5L3 21l4.7-1.2A9 9 0 1 0 12 3Z" fill="currentColor" fillOpacity="0.15" />
+      <path
+        d="M9 8.5c.3 2 1.5 4.2 3.2 5.7.6.5 1.1.9 1.6 1.1.4.2.8 0 1-.3l.6-1c.2-.3.6-.4.9-.2l2 1c.3.2.4.5.3.8-.3 1-1.3 1.7-2.4 1.6-2.6-.2-5.1-1.7-6.7-3.9C8 11.9 7.3 10.2 7.2 8.6c-.1-1.1.7-2 1.7-2.2.3-.1.6.1.7.4Z"
+        fill="currentColor"
+        stroke="none"
+      />
+    </svg>
+  );
+}
+
+// Simple envelope, marking the "share via email" action.
+export function IconMail(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <rect x="3" y="5" width="18" height="14" rx="2.5" fill="currentColor" fillOpacity="0.12" />
+      <path d="m4 6.5 8 6.5 8-6.5" />
+    </svg>
+  );
+}
+
+// A classic phone handset, marking the "call" action (paired with
+// IconWhatsApp on lead rows — one dials, the other opens a chat).
+export function IconPhone(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path
+        d="M6.6 3.5 9 4.9c.5.3.7.9.5 1.4l-1 2.4a1 1 0 0 0 .2 1.1l4.8 4.8c.3.3.7.4 1.1.2l2.4-1c.5-.2 1.1 0 1.4.5l1.4 2.4c.3.5.2 1.1-.2 1.5l-1.5 1.4c-.5.5-1.3.7-1.9.5-3.6-1.1-6.9-3.1-9.6-5.8-2.7-2.7-4.7-6-5.8-9.6-.2-.7 0-1.4.5-1.9L5.1 3.7c.4-.4 1-.5 1.5-.2Z"
+        fill="currentColor"
+        fillOpacity="0.15"
+      />
+    </svg>
+  );
+}
+
+// A calendar with a small filled accent cell in the corner — marks
+// content pulled from the synced phone/Google Calendar (see JobsCalendar
+// and the dashboard's "today" card), echoing the small blue dot used
+// on synced day-cells elsewhere in the app.
+export function IconCalendarSync(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <rect x="3.5" y="5" width="17" height="15" rx="2.5" fill="currentColor" fillOpacity="0.12" />
+      <path d="M3.5 9.5h17" />
+      <path d="M8 3v4M16 3v4" />
+      <circle cx="16.25" cy="15" r="2.75" fill="currentColor" fillOpacity="0.4" />
+    </svg>
+  );
+}

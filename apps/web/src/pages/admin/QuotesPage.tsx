@@ -11,7 +11,6 @@ import {
   type Job,
   type PriceListItem,
   QUOTE_STATUS_LABELS,
-  DEFAULT_VAT_RATE,
   strings,
 } from "@repo/shared";
 import {
@@ -21,7 +20,6 @@ import {
   Combobox,
   Input,
   Label,
-  Select,
   Table,
   TableBody,
   TableCell,
@@ -34,14 +32,18 @@ import {
 } from "@repo/ui";
 import { FormField } from "../../components/FormField";
 import { PageHeader } from "../../components/PageHeader";
+import { DetailToolbar } from "../../components/DetailToolbar";
 import { StatusBadge } from "../../components/StatusBadge";
-import { IconFileText } from "../../components/icons";
+import { StatusSelect } from "../../components/StatusSelect";
+import { IconFileText, IconShare, IconWhatsApp } from "../../components/icons";
 import { QuickAddCustomerModal } from "../../components/QuickAddCustomerModal";
 import { QuotePreviewModal } from "../../components/QuoteViewModal";
 import { QuoteDocumentView, type QuoteDocumentData } from "../../components/QuoteDocumentView";
 import { formatCurrency, formatDate } from "../../lib/format";
 import { getErrorMessage } from "../../lib/errors";
 import { useQuoteSharing } from "../../hooks/useQuoteSharing";
+import { useQuoteFooterText } from "../../hooks/useQuoteFooterText";
+import { useVatRate } from "../../hooks/useVatRate";
 import { supabase } from "../../lib/supabase";
 
 const quoteFormSchema = quoteSchema.extend({
@@ -60,6 +62,7 @@ export function QuotesPage() {
   const queryClient = useQueryClient();
   const toast = useToast();
   const [creating, setCreating] = React.useState(false);
+  const [creatingPreviewOpen, setCreatingPreviewOpen] = React.useState(false);
   const [search, setSearch] = React.useState("");
 
   const { data: quotes, isLoading } = useQuery({
@@ -98,14 +101,9 @@ export function QuotesPage() {
     },
   });
 
-  const { data: vatRate } = useQuery({
-    queryKey: ["app_settings", "vat_rate"],
-    queryFn: async () => {
-      const { data, error } = await supabase.from("app_settings").select("*").eq("key", "vat_rate").maybeSingle();
-      if (error) throw error;
-      return typeof data?.value === "number" ? data.value : DEFAULT_VAT_RATE;
-    },
-  });
+  // Shared hook (see useVatRate.ts) so this save path and the form's own
+  // on-screen totals below can't disagree about the rate.
+  const { vatRate } = useVatRate();
 
   const customerNameById = React.useMemo(() => {
     const map = new Map<string, string>();
@@ -115,7 +113,7 @@ export function QuotesPage() {
 
   const create = useMutation({
     mutationFn: async (values: QuoteFormInput) => {
-      const rate = vatRate ?? DEFAULT_VAT_RATE;
+      const rate = vatRate;
       const subtotal = values.line_items.reduce((sum, li) => sum + li.quantity * li.unit_price, 0);
       const discountAmount = values.discount_type === "percent" ? (subtotal * values.discount) / 100 : values.discount;
       const taxable = Math.max(0, subtotal - discountAmount);
@@ -125,7 +123,10 @@ export function QuotesPage() {
       const quotePayload = {
         customer_id: values.customer_id,
         job_id: values.job_id || null,
-        issued_date: values.issued_date || null,
+        // quotes.issued_date is NOT NULL in the DB (defaults to today) — a
+        // cleared field falls back to today rather than sending null, which
+        // the column would reject.
+        issued_date: values.issued_date || new Date().toISOString().slice(0, 10),
         valid_until: values.valid_until || null,
         discount: values.discount,
         discount_type: values.discount_type,
@@ -149,6 +150,7 @@ export function QuotesPage() {
         unit_price: li.unit_price,
         line_total: li.quantity * li.unit_price,
         sort_order: index,
+        hide_price: li.hide_price ?? false,
       }));
       const { error: insError } = await supabase.from("quote_line_items").insert(lineItemRows);
       if (insError) throw insError;
@@ -171,12 +173,22 @@ export function QuotesPage() {
 
   return (
     <div className="flex flex-col gap-6">
+      {/* Pinned like every detail page's DetailToolbar — "+ הצעה חדשה" used
+          to live only in PageHeader's action slot, which scrolls away with
+          the rest of the page on a long list. Same fixed-to-top treatment,
+          just with the page title standing in for the back link since a
+          list page has nowhere to go back to. */}
+      <DetailToolbar>
+        <span className="text-sm font-medium text-muted-foreground">{strings.nav.quotes}</span>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <Button onClick={() => setCreating((v) => !v)}>+ הצעה חדשה</Button>
+        </div>
+      </DetailToolbar>
       <PageHeader
         title={strings.nav.quotes}
         description="רשימת הצעות המחיר — חיפוש ויצירה. לחיצה על הצעה פותחת את כל הפרטים שלה."
         icon={IconFileText}
         color="bg-sky-500"
-        action={<Button onClick={() => setCreating((v) => !v)}>+ הצעה חדשה</Button>}
       />
 
       {creating && (
@@ -190,6 +202,8 @@ export function QuotesPage() {
           error={create.error instanceof Error ? create.error.message : null}
           onCancel={() => setCreating(false)}
           onSubmit={(values) => create.mutate(values)}
+          previewOpen={creatingPreviewOpen}
+          onPreviewOpenChange={setCreatingPreviewOpen}
         />
       )}
 
@@ -239,7 +253,13 @@ export function QuotesPage() {
 
 interface QuoteFormProps {
   initial: Quote | null;
-  initialLineItems: { price_list_item_id: string | null; description: string; quantity: number; unit_price: number }[];
+  initialLineItems: {
+    price_list_item_id: string | null;
+    description: string;
+    quantity: number;
+    unit_price: number;
+    hide_price?: boolean;
+  }[];
   customers: Customer[];
   jobs: Job[];
   priceListItems: PriceListItem[];
@@ -247,6 +267,14 @@ interface QuoteFormProps {
   error: string | null;
   onCancel: () => void;
   onSubmit: (values: QuoteFormInput) => void;
+  /** Controlled from the parent (not a local useState in here) so a pinned
+   *  toolbar button outside this form — QuoteDetailPage's fixed
+   *  DetailToolbar, while editing — can open the same preview modal without
+   *  needing the person to scroll down to this form's own "תצוגה מקדימה"
+   *  button first. QuotesPage's "create new" usage just keeps its own
+   *  useState next to this call and passes it straight through. */
+  previewOpen: boolean;
+  onPreviewOpenChange: (open: boolean) => void;
 }
 
 // Exported so QuoteDetailPage can reuse the exact same fields/validation
@@ -262,6 +290,8 @@ export function QuoteForm({
   error,
   onCancel,
   onSubmit,
+  previewOpen,
+  onPreviewOpenChange,
 }: QuoteFormProps) {
   const {
     register,
@@ -292,10 +322,16 @@ export function QuoteForm({
               description: li.description,
               quantity: li.quantity,
               unit_price: li.unit_price,
+              hide_price: li.hide_price ?? false,
             }))
-          : [{ price_list_item_id: null, description: "", quantity: 1, unit_price: 0 }],
+          : [{ price_list_item_id: null, description: "", quantity: 1, unit_price: 0, hide_price: false }],
     },
   });
+
+  // The same rate the save path uses (see useVatRate.ts) — these on-screen
+  // totals, the preview modal and the shared PDF all read it, so what the
+  // customer is shown is exactly what gets stored.
+  const { vatRate } = useVatRate();
 
   const { fields, append, remove } = useFieldArray({ control, name: "line_items" });
   const lineItems = watch("line_items");
@@ -307,14 +343,19 @@ export function QuoteForm({
   const watchedValidUntil = watch("valid_until");
   const includeVat = watch("include_vat");
 
+  // Same fixed text on every quote (edited once on SettingsPage) — used
+  // here so the live preview and the "share as PDF while editing" flow
+  // below show it exactly like a saved quote does (see
+  // useQuoteDocumentData.ts, which reads the identical setting).
+  const { footerText } = useQuoteFooterText();
+
   const [quickAddOpen, setQuickAddOpen] = React.useState(false);
-  const [showPreview, setShowPreview] = React.useState(false);
 
   const subtotal = lineItems.reduce((sum, li) => sum + (Number(li.quantity) || 0) * (Number(li.unit_price) || 0), 0);
   const discountAmount =
     discountType === "percent" ? (subtotal * (Number(discount) || 0)) / 100 : Number(discount) || 0;
   const taxable = Math.max(0, subtotal - discountAmount);
-  const estimatedTax = includeVat ? taxable * DEFAULT_VAT_RATE : 0;
+  const estimatedTax = includeVat ? taxable * vatRate : 0;
   const estimatedTotal = taxable + estimatedTax;
 
   const previewData: QuoteDocumentData = {
@@ -322,26 +363,44 @@ export function QuoteForm({
     issuedDate: watchedIssuedDate || null,
     validUntil: watchedValidUntil || null,
     status: (watch("status") as string) ?? "draft",
-    customerName: customers.find((c) => c.id === watchedCustomerId)?.name ?? "—",
-    customerPhone: customers.find((c) => c.id === watchedCustomerId)?.phone ?? null,
+    customerName:
+      customers.find((c) => c.id === watchedCustomerId)?.document_name ??
+      customers.find((c) => c.id === watchedCustomerId)?.name ??
+      "—",
+    customerBusinessId: customers.find((c) => c.id === watchedCustomerId)?.business_id ?? null,
+    // Same mobile-first phone + combined address/city logic as
+    // useQuoteDocumentData.ts, so a live preview shows exactly what the
+    // saved quote will show.
+    customerPhone:
+      customers.find((c) => c.id === watchedCustomerId)?.mobile_phone ||
+      customers.find((c) => c.id === watchedCustomerId)?.phone ||
+      null,
     customerEmail: customers.find((c) => c.id === watchedCustomerId)?.email ?? null,
-    customerAddress: customers.find((c) => c.id === watchedCustomerId)?.address ?? null,
+    customerAddress:
+      [
+        customers.find((c) => c.id === watchedCustomerId)?.address,
+        customers.find((c) => c.id === watchedCustomerId)?.city,
+      ]
+        .filter(Boolean)
+        .join(", ") || null,
     lineItems: lineItems.map((li, i) => ({
       id: String(i),
       description: li.description,
       quantity: Number(li.quantity) || 0,
       unit_price: Number(li.unit_price) || 0,
       line_total: (Number(li.quantity) || 0) * (Number(li.unit_price) || 0),
+      hidePrice: !!li.hide_price,
     })),
     subtotal,
     discount: discountAmount,
     discountType,
     discountPercent: discountType === "percent" ? Number(discount) || 0 : null,
     includeVat: !!includeVat,
-    taxRate: DEFAULT_VAT_RATE,
+    taxRate: vatRate,
     taxAmount: estimatedTax,
     total: estimatedTotal,
     notes: watchedNotes,
+    footerText,
   };
 
   // Sharing an already-saved quote directly from the edit screen — built
@@ -354,7 +413,12 @@ export function QuoteForm({
   return (
     <Card>
       <CardContent className="p-4">
-        <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4">
+        {/* id lets QuoteDetailPage's fixed DetailToolbar submit this form
+            with a `form="quote-form"` button while editing, so "שמור
+            שינויים" is reachable without scrolling all the way down here
+            first — same pattern as InspectionHeaderForm's sticky bar (see
+            ResourceCategoryDetailPage). */}
+        <form id="quote-form" onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <FormField label="לקוח" htmlFor="customer_id" error={errors.customer_id?.message}>
               <Controller
@@ -392,18 +456,29 @@ export function QuoteForm({
             <FormField label="תאריך הפקה" htmlFor="issued_date" error={errors.issued_date?.message}>
               <Input id="issued_date" type="date" {...register("issued_date")} />
             </FormField>
-            {initial && (
-              <FormField label={strings.common.status} htmlFor="status" error={errors.status?.message}>
-                <Select id="status" {...register("status")}>
-                  {Object.entries(QUOTE_STATUS_LABELS).map(([value, label]) => (
-                    <option key={value} value={value}>
-                      {label}
-                    </option>
-                  ))}
-                </Select>
-              </FormField>
-            )}
+            {/* valid_until was saved, shown on the quote page, in the customer
+                portal and on the PDF — but had no input anywhere, so it was
+                always empty. A quote with no expiry is a quote that stays
+                binding forever, and copper prices move. */}
+            <FormField label="בתוקף עד" htmlFor="valid_until" error={errors.valid_until?.message}>
+              <Input id="valid_until" type="date" {...register("valid_until")} />
+            </FormField>
+            {/* Status is changed from the quick selector in the detail
+                page's fixed toolbar instead of here — editing a quote's
+                content and changing its status are separate actions, and
+                the toolbar selector is reachable without opening this
+                form at all. */}
           </div>
+
+          {/* Positioned right here — immediately after the customer/dates
+              fields and before the line items — so editing matches where
+              this shows up on the actual document: the accent "הערות
+              והבהרות" bar sits right above the line items table too (see
+              QuoteDocumentView.tsx). It used to live down near the totals/
+              submit buttons, disconnected from where it actually appears. */}
+          <FormField label="הערות והבהרות" htmlFor="notes" error={errors.notes?.message}>
+            <Textarea id="notes" {...register("notes")} />
+          </FormField>
 
           <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between">
@@ -412,7 +487,9 @@ export function QuoteForm({
                 type="button"
                 variant="outline"
                 size="sm"
-                onClick={() => append({ price_list_item_id: null, description: "", quantity: 1, unit_price: 0 })}
+                onClick={() =>
+                  append({ price_list_item_id: null, description: "", quantity: 1, unit_price: 0, hide_price: false })
+                }
               >
                 + שורה
               </Button>
@@ -450,10 +527,23 @@ export function QuoteForm({
               </div>
               <div className="flex gap-2">
                 <Input id="discount" type="number" step="0.01" className="flex-1" {...register("discount")} />
-                <Select {...register("discount_type")} className="w-16 shrink-0" aria-label="סוג הנחה">
-                  <option value="fixed">₪</option>
-                  <option value="percent">%</option>
-                </Select>
+                <Controller
+                  name="discount_type"
+                  control={control}
+                  render={({ field }) => (
+                    <StatusSelect
+                      showDot={false}
+                      className="w-16 shrink-0 px-2"
+                      aria-label="סוג הנחה"
+                      value={field.value}
+                      onChange={field.onChange}
+                      options={[
+                        { value: "fixed" as const, label: "₪" },
+                        { value: "percent" as const, label: "%" },
+                      ]}
+                    />
+                  )}
+                />
               </div>
               {errors.discount?.message && <p className="text-xs text-destructive">{errors.discount.message}</p>}
             </div>
@@ -462,7 +552,7 @@ export function QuoteForm({
           <div className="flex flex-col items-end gap-2 border-t pt-3 text-sm">
             <label className="flex items-center gap-2 self-end text-sm">
               <input type="checkbox" {...register("include_vat")} className="h-4 w-4" />
-              כולל מע״מ ({Math.round(DEFAULT_VAT_RATE * 100)}%)
+              כולל מע״מ ({Math.round(vatRate * 100)}%)
             </label>
             {/* Order mirrors the issued document: subtotal, then VAT, then
                 the discount, then the final total — the owner asked for
@@ -474,7 +564,7 @@ export function QuoteForm({
             </div>
             {includeVat && (
               <div className="flex w-48 justify-between">
-                <span className="text-muted-foreground">מע״מ ({Math.round(DEFAULT_VAT_RATE * 100)}%)</span>
+                <span className="text-muted-foreground">מע״מ ({Math.round(vatRate * 100)}%)</span>
                 <span>{formatCurrency(estimatedTax)}</span>
               </div>
             )}
@@ -493,9 +583,6 @@ export function QuoteForm({
             {!includeVat && <span className="text-xs text-muted-foreground">* אינו כולל מע״מ (עוסק פטור)</span>}
           </div>
 
-          <FormField label="הערות" htmlFor="notes" error={errors.notes?.message}>
-            <Textarea id="notes" {...register("notes")} />
-          </FormField>
           {!initial && <input type="hidden" {...register("status")} />}
           {error && <p className="text-sm text-destructive">{error}</p>}
           <div className="flex flex-wrap gap-2">
@@ -522,19 +609,36 @@ export function QuoteForm({
                 </Button>
               </>
             )}
-            <Button type="button" variant="outline" onClick={() => setShowPreview(true)}>
+            <Button type="button" variant="outline" onClick={() => onPreviewOpenChange(true)}>
               תצוגה מקדימה
             </Button>
             {initial && (
               <>
-                <Button type="button" variant="outline" onClick={sharing.shareGeneric} disabled={sharing.busy !== null}>
-                  {sharing.busy === "share" ? "משתף..." : "שיתוף"}
+                {/* Icon-only, no label — matches QuoteDetailPage.tsx's
+                    toolbar. "שיתוף במייל" dropped: on desktop it's the same
+                    fallback (PDF download) as the generic share button, so
+                    it wasn't earning its own button. */}
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-10 px-0"
+                  aria-label="שיתוף"
+                  title={sharing.busy === "share" ? "משתף..." : "שיתוף"}
+                  onClick={sharing.shareGeneric}
+                  disabled={sharing.busy !== null}
+                >
+                  <IconShare className="h-4 w-4" />
                 </Button>
-                <Button type="button" variant="outline" onClick={sharing.shareEmail} disabled={sharing.busy !== null}>
-                  {sharing.busy === "email" ? "משתף..." : "שיתוף במייל"}
-                </Button>
-                <Button type="button" variant="outline" onClick={sharing.shareWhatsApp} disabled={sharing.busy !== null}>
-                  {sharing.busy === "whatsapp" ? "משתף..." : "שיתוף בוואטסאפ"}
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-10 px-0"
+                  aria-label="שיתוף בוואטסאפ"
+                  title={sharing.busy === "whatsapp" ? "משתף..." : "שיתוף בוואטסאפ"}
+                  onClick={sharing.shareWhatsApp}
+                  disabled={sharing.busy !== null}
+                >
+                  <IconWhatsApp className="h-4 w-4" />
                 </Button>
               </>
             )}
@@ -554,16 +658,30 @@ export function QuoteForm({
           }}
         />
       )}
-      {showPreview && <QuotePreviewModal data={previewData} onClose={() => setShowPreview(false)} />}
+      {previewOpen && <QuotePreviewModal data={previewData} onClose={() => onPreviewOpenChange(false)} />}
       {/* Rendered off-screen (not display:none, so it still lays out and can
           be rasterized) purely so the share buttons above have something
           to turn into a PDF, built from the current form values — without
           this the person would have to save and reopen the "view" modal
           just to share. */}
       {initial && (
-        <div style={{ position: "fixed", top: 0, left: "-9999px", pointerEvents: "none" }} aria-hidden="true">
+        // Explicit width matters here: this div is `position: fixed` with
+        // only `left` set, which (unlike normal document flow) makes width
+        // resolve via shrink-to-fit instead of expanding to fill available
+        // space — so without a width, it was sizing itself to whatever was
+        // narrower than QuoteDocumentView's own `max-w-3xl` (48rem), which
+        // on a short quote (little text, few line items) could be
+        // considerably less than 768px. elementToPdfBlob maps this
+        // element's actual width onto a full A4 page width, so a narrower
+        // rasterized width meant less usable page-height was "budgeted" in
+        // the original element's own coordinate space — the same content,
+        // measured against a narrower page, could overflow onto a second
+        // page even for a short quote with barely any line items. Fixing
+        // the width here to match max-w-3xl exactly removes that
+        // dependency on content length entirely.
+        <div style={{ position: "fixed", top: 0, left: "-9999px", width: "48rem", pointerEvents: "none" }} aria-hidden="true">
           <div ref={sharing.docRef}>
-            <QuoteDocumentView data={previewData} />
+            <QuoteDocumentView data={previewData} fillPage />
           </div>
         </div>
       )}
@@ -641,7 +759,16 @@ function LineItemRow({ index, control, register, errors, priceListItems, onRemov
       >
         <Input id={`line_items.${index}.unit_price`} type="number" step="0.01" {...register(`line_items.${index}.unit_price`)} />
       </FormField>
-      <div className="sm:col-span-1">
+      <div className="sm:col-span-1 flex flex-col items-start gap-1.5">
+        {/* Per-line "mask this row's price" toggle — shows as "****" instead
+            of the real numbers on the document (columns stay, only the
+            numbers hide), see QuoteDocumentView.tsx. Deliberately per row,
+            not a single quote-wide setting: some lines' prices are fine to
+            show, others aren't, on the same quote. */}
+        <label className="flex items-center gap-1.5 whitespace-nowrap text-xs text-muted-foreground">
+          <input type="checkbox" {...register(`line_items.${index}.hide_price`)} className="h-3.5 w-3.5" />
+          הסתרת מחיר
+        </label>
         {onRemove && (
           <Button type="button" variant="ghost" size="sm" onClick={onRemove}>
             הסר

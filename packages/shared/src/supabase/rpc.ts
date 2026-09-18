@@ -40,3 +40,18 @@ export async function recordInventoryTransaction(
   if (error) throw error;
   return data;
 }
+
+// Customer-portal-only: accept or reject one of the caller's own "sent"
+// quotes. See supabase/migrations/0007_customer_quote_response.sql — this is
+// deliberately an RPC and not a client-side `.update()`, since quotes has no
+// customer UPDATE policy at all.
+export async function respondToQuote(
+  client: SupabaseClient<Database>,
+  args: { quoteId: string; accept: boolean }
+): Promise<void> {
+  const { error } = await client.rpc("respond_to_quote", {
+    p_quote_id: args.quoteId,
+    p_accept: args.accept,
+  });
+  if (error) throw error;
+}

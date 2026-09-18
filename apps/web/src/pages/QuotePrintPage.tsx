@@ -1,7 +1,9 @@
+import * as React from "react";
 import { useParams, Link } from "react-router-dom";
 import { Button } from "@repo/ui";
 import { QuoteDocumentView } from "../components/QuoteDocumentView";
 import { useQuoteDocumentData } from "../hooks/useQuoteDocumentData";
+import { StatusSelect } from "../components/StatusSelect";
 
 // Shared print/PDF view for a single quote, reachable from both the admin
 // panel (/admin/quotes/:id/print) and the customer portal
@@ -16,6 +18,12 @@ import { useQuoteDocumentData } from "../hooks/useQuoteDocumentData";
 export function QuotePrintPage() {
   const { id } = useParams<{ id: string }>();
   const { data, isLoading, error } = useQuoteDocumentData(id);
+  // "מקור" (original) for the first copy, "העתק" for any reprint — the
+  // one place this is actually chosen, since it's a decision made at the
+  // moment of printing/saving, not something worth storing on the quote
+  // itself. Every other surface (the in-page view modal, the live
+  // preview, a shared PDF) just shows the "מקור" default.
+  const [copyLabel, setCopyLabel] = React.useState<"מקור" | "העתק">("מקור");
 
   if (isLoading) {
     return <div className="p-8 text-muted-foreground">טוען...</div>;
@@ -38,9 +46,21 @@ export function QuotePrintPage() {
         <Link to=".." relative="path" className="text-sm text-primary underline">
           ← חזרה
         </Link>
-        <Button onClick={() => window.print()}>הדפסה / שמירה כ-PDF</Button>
+        <div className="flex items-center gap-2">
+          <StatusSelect
+            showDot={false}
+            aria-label="מקור / העתק"
+            value={copyLabel}
+            onChange={setCopyLabel}
+            options={[
+              { value: "מקור" as const, label: "מקור" },
+              { value: "העתק" as const, label: "העתק" },
+            ]}
+          />
+          <Button onClick={() => window.print()}>הדפסה / שמירה כ-PDF</Button>
+        </div>
       </div>
-      <QuoteDocumentView data={data} />
+      <QuoteDocumentView data={data} copyLabel={copyLabel} fillPage />
     </div>
   );
 }

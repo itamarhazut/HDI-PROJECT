@@ -61,12 +61,17 @@ export const EXPENSE_CATEGORY_LABELS: Record<string, string> = {
   other: "אחר",
 };
 
-export const EXPENSE_PAYMENT_METHOD_LABELS: Record<string, string> = {
+// Shared by expenses (money out) and invoice payments (money in) — one
+// list, so the two can't drift apart.
+export const PAYMENT_METHOD_LABELS: Record<string, string> = {
   cash: "מזומן",
   credit_card: "כרטיס אשראי",
   bank_transfer: "העברה בנקאית",
   check: "צ׳ק",
   other: "אחר",
 };
+
+/** @deprecated Use PAYMENT_METHOD_LABELS — kept so existing expense code stays valid. */
+export const EXPENSE_PAYMENT_METHOD_LABELS = PAYMENT_METHOD_LABELS;
 
 export const DEFAULT_VAT_RATE = 0.18;

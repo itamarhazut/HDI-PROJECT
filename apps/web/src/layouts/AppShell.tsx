@@ -55,16 +55,30 @@ export function AppShell({ navItems }: AppShellProps) {
   useAppliedTheme();
 
   return (
-    <div className="flex min-h-screen">
+    // Locked to the viewport (not just min-h-screen, which only sets a
+    // *floor* — a page taller than the window used to grow the whole
+    // document instead of scrolling internally, so the browser/OS scrolled
+    // html/body as one unit and dragged the sidebar down along with the
+    // page content). h-screen + overflow-hidden here makes this the one
+    // fixed-size box for the whole app, so only <main> below — the actual
+    // scrollable region — ever grows a scrollbar. This is also what makes
+    // the app fit correctly in a short window (e.g. snapped to half the
+    // screen): the shell now always matches the real viewport instead of
+    // assuming there's enough height for everything to fit unscrolled.
+    <div className="flex h-screen overflow-hidden">
       <aside className="flex w-64 shrink-0 flex-col bg-sidebar text-sidebar-foreground border-e border-sidebar-border">
         <div className="flex items-center gap-2.5 px-5 py-5">
           <Logo
             markClassName="h-9 w-9 shrink-0"
-            wordmarkClassName="text-base font-bold tracking-tight text-sidebar-foreground"
+            wordmarkClassName="text-xl font-extrabold tracking-tight text-sidebar-foreground"
           />
         </div>
 
-        <nav className="flex flex-1 flex-col gap-1 px-3 py-2">
+        {/* Its own scroll region, independent from <main> — a long nav
+            list (or a short window) scrolls just this middle section,
+            while the logo above and the profile/sign-out block below stay
+            pinned in place. */}
+        <nav className="flex flex-1 flex-col gap-1 overflow-y-auto px-3 py-2">
           {navItems.map((item, i) => {
             const Icon = item.icon;
             const badgeColor = NAV_BADGE_COLORS[i % NAV_BADGE_COLORS.length];

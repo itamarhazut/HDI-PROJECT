@@ -11,28 +11,55 @@ import jsPDF from "jspdf";
 // Trade-off: the resulting PDF's text isn't selectable/searchable — worth
 // it for a customer-facing document where visual correctness matters most.
 // How many source pixels to rasterize per on-screen CSS pixel. Picked so the
-// final image is ~2000px wide regardless of the element's actual on-screen
+// final image is ~2600px wide regardless of the element's actual on-screen
 // width (which varies — it's rendered off-screen at its natural width, not
-// forced to any particular size). 2000px across an A4-width page works out
-// to roughly 240 DPI, sharp enough that the document doesn't look fuzzy when
-// viewed at full size or printed. Clamped so a narrow element doesn't get
-// blown up absurdly, and a huge one doesn't produce a multi-tens-of-MB file.
-const TARGET_RASTER_WIDTH_PX = 2000;
+// forced to any particular size). 2600px across an A4-width page works out
+// to roughly 310 DPI — noticeably crisper than the previous 2000px/240 DPI,
+// which was fine on screen but visibly soft on a printed page. Clamped so a
+// narrow element doesn't get blown up absurdly, and a huge one doesn't
+// produce a multi-tens-of-MB file.
+const TARGET_RASTER_WIDTH_PX = 2600;
 
-export async function elementToPdfBlob(element: HTMLElement): Promise<Blob> {
+export async function elementToPdfBlob(
+  element: HTMLElement,
+  options?: {
+    /** Selector for "safe to cut the page here" elements — see the row-boundary comment below. Defaults to "tr". */
+    pageBreakSelector?: string;
+  },
+): Promise<Blob> {
   const scale = Math.min(4, Math.max(2, TARGET_RASTER_WIDTH_PX / element.offsetWidth));
+
+  // Every element that's safe to end a page on (by default, every table
+  // row), measured in CSS pixels relative to `element`'s own top edge —
+  // collected BEFORE rasterizing, since this needs real layout positions,
+  // not pixels in an image. When a document needs a genuine second page,
+  // the old code always cut at a fixed page-height increment, which could
+  // land in the middle of a line-item row — visually, a row's text sliced
+  // clean in half between page 1 and page 2. That's exactly what adding a
+  // few extra line items to a quote used to trigger. Below, every page
+  // break snaps to the nearest one of these boundaries at or before the
+  // natural cutoff instead.
+  const pageBreakSelector = options?.pageBreakSelector ?? "tr";
+  const containerTop = element.getBoundingClientRect().top;
+  const rowBreaksCssPx = Array.from(element.querySelectorAll<HTMLElement>(pageBreakSelector))
+    .map((row) => row.getBoundingClientRect().bottom - containerTop)
+    .filter((y) => y > 0)
+    .sort((a, b) => a - b);
+
   const canvas = await html2canvas(element, {
     scale,
     useCORS: true,
     backgroundColor: "#ffffff",
   });
-  const imgData = canvas.toDataURL("image/png");
 
   const pdf = new jsPDF({ unit: "pt", format: "a4" });
   const pageWidth = pdf.internal.pageSize.getWidth();
   const pageHeight = pdf.internal.pageSize.getHeight();
   const imgWidth = pageWidth;
-  let imgHeight = (canvas.height * imgWidth) / canvas.width;
+  // pt (PDF page units) per canvas pixel — uniform in both axes, so the
+  // same factor converts a canvas-px row boundary into a pt-space cutoff.
+  const ptPerCanvasPx = imgWidth / canvas.width;
+  let fullImgHeightPt = canvas.height * ptPerCanvasPx;
 
   // A short document (e.g. a one-line quote) can end up JUST over one A4
   // page — a few points of overflow from margins/rounding — which used to
@@ -40,26 +67,71 @@ export async function elementToPdfBlob(element: HTMLElement): Promise<Blob> {
   // on it. If the overflow is small (under 6%), it's imperceptible to
   // squeeze the image to fit exactly one page instead of spawning another.
   // IMPORTANT: this must only fire when the content actually overflows
-  // (imgHeight > pageHeight) — an earlier version applied it whenever
-  // imgHeight was merely "at or under" the tolerance, which also matched
-  // ordinary SHORT documents and force-stretched them to fill the entire
-  // page, making everything look artificially tall and unnatural.
+  // (fullImgHeightPt > pageHeight) — an earlier version applied it whenever
+  // it was merely "at or under" the tolerance, which also matched ordinary
+  // SHORT documents and force-stretched them to fill the entire page,
+  // making everything look artificially tall and unnatural.
   const OVERFLOW_TOLERANCE = 1.06;
-  if (imgHeight > pageHeight && imgHeight <= pageHeight * OVERFLOW_TOLERANCE) {
-    imgHeight = pageHeight;
+  const squeezeToOnePage = fullImgHeightPt > pageHeight && fullImgHeightPt <= pageHeight * OVERFLOW_TOLERANCE;
+  if (squeezeToOnePage) {
+    fullImgHeightPt = pageHeight;
   }
 
-  let heightLeft = imgHeight;
-  let position = 0;
+  // Row boundaries, converted from CSS px (measured on the live element,
+  // pre-rasterize) to canvas px (the actual rasterized image's coordinate
+  // space) — derived from the canvas's own dimensions rather than trusting
+  // `scale` verbatim, in case html2canvas's real output differs slightly.
+  const canvasPxPerCssPx = canvas.width / element.offsetWidth;
+  const rowBreaksCanvasPx = rowBreaksCssPx.map((y) => y * canvasPxPerCssPx);
 
-  pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
-  heightLeft -= pageHeight;
+  const scratchCanvas = document.createElement("canvas");
+  scratchCanvas.width = canvas.width;
+  const ctx = scratchCanvas.getContext("2d");
+  if (!ctx) throw new Error("קנבס דו-ממדי אינו נתמך בדפדפן זה.");
 
-  while (heightLeft > 0) {
-    position = heightLeft - imgHeight;
-    pdf.addPage();
-    pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
-    heightLeft -= pageHeight;
+  // Crops [startPx, endPx) out of the full rasterized canvas (in canvas
+  // px) onto its own page, instead of placing the whole image shifted up
+  // by an ever-growing offset (the old trick, which only works when every
+  // page is exactly `pageHeight` tall). Cropping lets each page be exactly
+  // as tall as its own slice — necessary once slices no longer all match
+  // the same fixed height.
+  const addSlice = (startPx: number, endPx: number, isFirstPage: boolean) => {
+    const slicePx = Math.max(1, Math.round(endPx - startPx));
+    scratchCanvas.height = slicePx;
+    ctx.clearRect(0, 0, scratchCanvas.width, slicePx);
+    ctx.drawImage(canvas, 0, startPx, canvas.width, slicePx, 0, 0, canvas.width, slicePx);
+    const sliceHeightPt = slicePx * ptPerCanvasPx;
+    if (!isFirstPage) pdf.addPage();
+    pdf.addImage(scratchCanvas.toDataURL("image/png"), "PNG", 0, 0, imgWidth, sliceHeightPt);
+  };
+
+  if (fullImgHeightPt <= pageHeight) {
+    // Fits on one page (including the squeeze-to-fit case above) — a
+    // single slice of the whole thing, no row-boundary snapping needed.
+    addSlice(0, canvas.height, true);
+  } else {
+    const pageHeightCanvasPx = pageHeight / ptPerCanvasPx;
+    let cursorPx = 0;
+    let firstPage = true;
+    while (cursorPx < canvas.height - 0.5) {
+      const naiveEndPx = cursorPx + pageHeightCanvasPx;
+      let endPx: number;
+      if (naiveEndPx >= canvas.height) {
+        endPx = canvas.height;
+      } else {
+        // The last row boundary that's past the current cursor and still
+        // within this page's budget — as long as one exists. A single row
+        // taller than a full page (a huge notes block, say) has no such
+        // boundary, so it falls back to the naive fixed-height cut rather
+        // than looping forever on the same position.
+        const candidates = rowBreaksCanvasPx.filter((y) => y > cursorPx + 1 && y <= naiveEndPx);
+        // Safe: just checked candidates.length > 0, so the last index exists.
+        endPx = candidates.length > 0 ? candidates[candidates.length - 1]! : naiveEndPx;
+      }
+      addSlice(cursorPx, endPx, firstPage);
+      cursorPx = endPx;
+      firstPage = false;
+    }
   }
 
   return pdf.output("blob");

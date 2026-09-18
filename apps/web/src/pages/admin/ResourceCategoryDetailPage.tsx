@@ -14,9 +14,11 @@ import {
   type DocumentSlot,
   strings,
 } from "@repo/shared";
-import { Button, Card, CardContent, Combobox, Input, Modal, Select, Textarea, useConfirmDialog, useToast } from "@repo/ui";
+import { Button, Card, CardContent, Combobox, Input, Modal, Textarea, useConfirmDialog, useToast } from "@repo/ui";
+import { DetailToolbar } from "../../components/DetailToolbar";
 import { FormField } from "../../components/FormField";
 import { PageHeader } from "../../components/PageHeader";
+import { StatusSelect } from "../../components/StatusSelect";
 import { IconChevronDown, IconFileText, IconInfo, IconPencil } from "../../components/icons";
 import { QuickAddCustomerModal } from "../../components/QuickAddCustomerModal";
 import iecLogo from "../../assets/iec-logo.png";
@@ -390,33 +392,36 @@ export function ResourceCategoryDetailPage() {
             of the screen without anything else competing for that space. */}
         {!openInspectionId && (
           <>
-            <BackLink />
-            <PageHeader
-              title={category.name}
-              logoSrc={iecLogo}
-              logoAlt="חברת החשמל"
-              action={
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setInfoOpen(true)}
-                    aria-label="מידע"
-                    className="rounded-full p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-                  >
-                    <IconInfo className="h-5 w-5" />
-                  </button>
-                  <button
-                    onClick={() => setDocsOpen(true)}
-                    aria-label="מסמכים"
-                    className="rounded-full p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-                  >
-                    <IconFileText className="h-5 w-5" />
-                  </button>
-                  <Button size="sm" onClick={() => createInspection.mutate()} disabled={createInspection.isPending}>
-                    + התחלת בדיקה חדשה
-                  </Button>
-                </div>
-              }
-            />
+            {/* Same pinned-to-top treatment as InspectionDetail's own
+                toolbar below (see DetailToolbar) — this category-level view
+                used to have a plain, non-sticky BackLink here, so on a
+                category with many past inspections, scrolling down lost the
+                back link and action buttons entirely. */}
+            <DetailToolbar>
+              <Link to="/admin/resources" className="text-sm font-medium text-muted-foreground hover:text-foreground">
+                ‹ {strings.common.back} לחברת חשמל
+              </Link>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setInfoOpen(true)}
+                  aria-label="מידע"
+                  className="rounded-full p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+                >
+                  <IconInfo className="h-5 w-5" />
+                </button>
+                <button
+                  onClick={() => setDocsOpen(true)}
+                  aria-label="מסמכים"
+                  className="rounded-full p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+                >
+                  <IconFileText className="h-5 w-5" />
+                </button>
+                <Button size="sm" onClick={() => createInspection.mutate()} disabled={createInspection.isPending}>
+                  + התחלת בדיקה חדשה
+                </Button>
+              </div>
+            </DetailToolbar>
+            <PageHeader title={category.name} logoSrc={iecLogo} logoAlt="חברת החשמל" />
           </>
         )}
 
@@ -483,41 +488,43 @@ export function ResourceCategoryDetailPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <BackLink />
-      <PageHeader
-        title={category.name}
-        logoSrc={iecLogo}
-        logoAlt="חברת החשמל"
-        action={
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setInfoOpen(true)}
-              aria-label="מידע"
-              className="rounded-full p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-            >
-              <IconInfo className="h-5 w-5" />
-            </button>
-            <Button variant="outline" size="sm" onClick={() => setEditing((v) => !v)}>
-              {strings.common.edit}
-            </Button>
-            <Button
-              variant="destructive"
-              size="sm"
-              onClick={async () => {
-                const ok = await confirmDialog({
-                  title: "מחיקת קטגוריה",
-                  description: `למחוק את "${category.name}" וכל הקבצים שבה? הפעולה אינה הפיכה.`,
-                  confirmLabel: "מחק",
-                  variant: "destructive",
-                });
-                if (ok) deleteCategory.mutate();
-              }}
-            >
-              {strings.common.delete}
-            </Button>
-          </div>
-        }
-      />
+      {/* Same pinned-to-top treatment as InspectionDetail's own toolbar (see
+          DetailToolbar) — this page used to have a plain, non-sticky
+          BackLink here, so on a category with a lot of notes/files,
+          scrolling down lost the back link and action buttons entirely. */}
+      <DetailToolbar>
+        <Link to="/admin/resources" className="text-sm font-medium text-muted-foreground hover:text-foreground">
+          ‹ {strings.common.back} לחברת חשמל
+        </Link>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setInfoOpen(true)}
+            aria-label="מידע"
+            className="rounded-full p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+          >
+            <IconInfo className="h-5 w-5" />
+          </button>
+          <Button variant="outline" size="sm" onClick={() => setEditing((v) => !v)}>
+            {strings.common.edit}
+          </Button>
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={async () => {
+              const ok = await confirmDialog({
+                title: "מחיקת קטגוריה",
+                description: `למחוק את "${category.name}" וכל הקבצים שבה? הפעולה אינה הפיכה.`,
+                confirmLabel: "מחק",
+                variant: "destructive",
+              });
+              if (ok) deleteCategory.mutate();
+            }}
+          >
+            {strings.common.delete}
+          </Button>
+        </div>
+      </DetailToolbar>
+      <PageHeader title={category.name} logoSrc={iecLogo} logoAlt="חברת החשמל" />
 
       {actionError && (
         <div className="flex items-center justify-between rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
@@ -848,7 +855,7 @@ function InspectionHistoryList({ inspections, customerNameById, onOpen }: Inspec
     return (
       <Card>
         <CardContent className="p-4 text-sm text-muted-foreground">
-          עדיין אין בדיקות שמורות. לחצו על "התחלת בדיקה חדשה" כדי להתחיל.
+          עדיין אין בדיקות שמורות. לחצו על &quot;התחלת בדיקה חדשה&quot; כדי להתחיל.
         </CardContent>
       </Card>
     );
@@ -921,55 +928,33 @@ function InspectionDetail({
   const insulationCalc = (inspection.insulation_calc ?? {}) as InsulationCalcState;
 
   // "חזרה" / מידע / שמירה / מחיקה — pinned to the very top of the screen at
-  // all times (position: fixed to the viewport, not just sticky within the
-  // scroll area), so it's always there whether you're at the top of the
-  // page or scrolled deep into the checklist. The save button submits via
-  // the `form` attribute (a button outside a <form> can still trigger it
-  // by id), so there's one save action, not two.
-  //
-  // `fixed` positioning is relative to the viewport, so it re-derives the
-  // sidebar/column layout by hand: `start-64` clears the 256px sidebar
-  // (AppShell's <aside> is w-64) and `end-0` runs to the far edge, then the
-  // inner `mx-auto max-w-6xl px-6 lg:px-8` matches AppShell's own content
-  // column so the bar lines up with everything else on the page.
-  //
-  // Since `fixed` elements don't reserve layout space, an identical
-  // invisible copy renders first (same markup, `invisible` so it keeps its
-  // size but not its pixels) purely to push the real content down by
-  // exactly the toolbar's real height — including if it wraps to two
-  // lines on a narrow phone screen.
-  const toolbar = (
-    <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-card p-3 shadow-md">
-      <button type="button" onClick={onBack} className="text-sm font-medium text-muted-foreground hover:text-foreground">
-        ‹ חזרה לרשימה
-      </button>
-      <div className="flex items-center gap-2">
-        <button
-          type="button"
-          onClick={onInfo}
-          aria-label="מידע"
-          className="rounded-full p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-        >
-          <IconInfo className="h-5 w-5" />
-        </button>
-        <Button type="submit" form="inspection-header-form" size="sm" disabled={submittingHeader}>
-          שמירת פרטי הבדיקה
-        </Button>
-        <Button variant="destructive" size="sm" onClick={onDelete}>
-          מחיקת בדיקה
-        </Button>
-      </div>
-    </div>
-  );
-
+  // all times via the shared DetailToolbar (see that component for how the
+  // fixed positioning works). The save button submits via the `form`
+  // attribute (a button outside a <form> can still trigger it by id), so
+  // there's one save action, not two.
   return (
     <div className="flex flex-col gap-6">
-      <div className="invisible" aria-hidden="true">
-        {toolbar}
-      </div>
-      <div className="fixed start-64 end-0 top-0 z-20">
-        <div className="mx-auto max-w-6xl px-6 py-3 lg:px-8">{toolbar}</div>
-      </div>
+      <DetailToolbar>
+        <button type="button" onClick={onBack} className="text-sm font-medium text-muted-foreground hover:text-foreground">
+          ‹ חזרה לרשימה
+        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={onInfo}
+            aria-label="מידע"
+            className="rounded-full p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+          >
+            <IconInfo className="h-5 w-5" />
+          </button>
+          <Button type="submit" form="inspection-header-form" size="sm" disabled={submittingHeader}>
+            שמירת פרטי הבדיקה
+          </Button>
+          <Button variant="destructive" size="sm" onClick={onDelete}>
+            מחיקת בדיקה
+          </Button>
+        </div>
+      </DetailToolbar>
 
       <InspectionHeaderForm initial={inspection} customers={customers} onSubmit={onSaveHeader} />
 
@@ -1277,22 +1262,42 @@ function InspectionHeaderForm({ initial, customers, onSubmit }: InspectionHeader
             </FormField>
             <FormField label="גודל חיבור" htmlFor="connection_phase">
               <div className="flex items-center gap-2">
-                <Select id="connection_phase" className="flex-1" aria-label="מספר פאזות" {...register("connection_phase")}>
-                  <option value="">פאזות...</option>
-                  {CONNECTION_PHASE_OPTIONS.map((o) => (
-                    <option key={o.value} value={o.value}>
-                      {o.label}
-                    </option>
-                  ))}
-                </Select>
-                <Select id="connection_amps" className="flex-1" aria-label="אמפראז׳" {...register("connection_amps")}>
-                  <option value="">אמפר...</option>
-                  {CONNECTION_AMPS_OPTIONS.map((a) => (
-                    <option key={a} value={a}>
-                      {a}A
-                    </option>
-                  ))}
-                </Select>
+                <Controller
+                  name="connection_phase"
+                  control={control}
+                  render={({ field }) => (
+                    <StatusSelect
+                      id="connection_phase"
+                      className="flex-1"
+                      aria-label="מספר פאזות"
+                      showDot={false}
+                      value={field.value}
+                      onChange={field.onChange}
+                      options={[
+                        { value: "", label: "פאזות..." },
+                        ...CONNECTION_PHASE_OPTIONS.map((o) => ({ value: o.value as string, label: o.label })),
+                      ]}
+                    />
+                  )}
+                />
+                <Controller
+                  name="connection_amps"
+                  control={control}
+                  render={({ field }) => (
+                    <StatusSelect
+                      id="connection_amps"
+                      className="flex-1"
+                      aria-label="אמפראז׳"
+                      showDot={false}
+                      value={field.value}
+                      onChange={field.onChange}
+                      options={[
+                        { value: "", label: "אמפר..." },
+                        ...CONNECTION_AMPS_OPTIONS.map((a) => ({ value: String(a), label: `${a}A` })),
+                      ]}
+                    />
+                  )}
+                />
                 {sizeLabel && <span className="shrink-0 text-sm font-medium text-muted-foreground">{sizeLabel}</span>}
               </div>
             </FormField>
@@ -1382,21 +1387,16 @@ function GroundingCalcPanel({ initial, onChange }: GroundingCalcPanelProps) {
     <div className="rounded-md border border-border bg-muted/40 p-3">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <FormField label="ממה הלוח עשוי" htmlFor="grounding_panel_material">
-          <Select
+          <StatusSelect
             id="grounding_panel_material"
+            showDot={false}
             value={panelMaterial}
-            onChange={(e) => {
-              const value = e.target.value as PanelMaterial;
+            onChange={(value) => {
               setPanelMaterial(value);
               commit({ panel_material: value });
             }}
-          >
-            {PANEL_MATERIAL_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </Select>
+            options={PANEL_MATERIAL_OPTIONS.map((o) => ({ value: o.value as PanelMaterial, label: o.label }))}
+          />
         </FormField>
         <FormField label={breakerRatingLabel(panelMaterial)} htmlFor="grounding_breaker">
           <Input
@@ -1466,21 +1466,16 @@ function InsulationMeasurementPanel({ initial, onChange }: InsulationMeasurement
           />
         </FormField>
         <FormField label="יחידה" htmlFor="insulation_unit">
-          <Select
+          <StatusSelect
             id="insulation_unit"
+            showDot={false}
             value={unit}
-            onChange={(e) => {
-              const value = e.target.value as InsulationUnit;
+            onChange={(value) => {
               setUnit(value);
               commit({ unit: value });
             }}
-          >
-            {INSULATION_UNIT_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </Select>
+            options={INSULATION_UNIT_OPTIONS.map((o) => ({ value: o.value as InsulationUnit, label: o.label }))}
+          />
         </FormField>
       </div>
     </div>

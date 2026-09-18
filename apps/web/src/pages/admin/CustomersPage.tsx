@@ -1,7 +1,7 @@
 import * as React from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { customerSchema, type CustomerInput, type Customer, strings } from "@repo/shared";
 import {
@@ -22,6 +22,8 @@ import {
 } from "@repo/ui";
 import { FormField } from "../../components/FormField";
 import { PageHeader } from "../../components/PageHeader";
+import { DetailToolbar } from "../../components/DetailToolbar";
+import { StatusSelect } from "../../components/StatusSelect";
 import { IconUsers } from "../../components/icons";
 import { getErrorMessage } from "../../lib/errors";
 import { supabase } from "../../lib/supabase";
@@ -38,6 +40,11 @@ export function CustomersPage() {
   const toast = useToast();
   const [creating, setCreating] = React.useState(false);
   const [search, setSearch] = React.useState("");
+  // Read from the URL (not local-only state) so the dashboard's "לקוחות
+  // ממתינים לאימות" card can link straight here with `?verification=pending`
+  // and land already filtered.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const verificationFilter: "all" | "pending" = searchParams.get("verification") === "pending" ? "pending" : "all";
 
   const { data: customers, isLoading } = useQuery({
     queryKey: ["customers"],
@@ -73,6 +80,7 @@ export function CustomersPage() {
   });
 
   const filtered = (customers ?? []).filter((c) => {
+    if (verificationFilter === "pending" && !c.pending_review) return false;
     const q = search.trim().toLowerCase();
     if (!q) return true;
     return [c.name, c.phone, c.email, c.business_id].some((v) => v?.toLowerCase().includes(q));
@@ -80,12 +88,19 @@ export function CustomersPage() {
 
   return (
     <div className="flex flex-col gap-6">
+      {/* Pinned like every detail page's DetailToolbar — see QuotesPage.tsx
+          for the full reasoning. */}
+      <DetailToolbar>
+        <span className="text-sm font-medium text-muted-foreground">{strings.nav.customers}</span>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <Button onClick={() => setCreating((v) => !v)}>+ לקוח חדש</Button>
+        </div>
+      </DetailToolbar>
       <PageHeader
         title={strings.nav.customers}
         description="רשימת הלקוחות של העסק — חיפוש ויצירה. לחיצה על לקוח פותחת את כרטיס הלקוח."
         icon={IconUsers}
         color="bg-teal-500"
-        action={<Button onClick={() => setCreating((v) => !v)}>+ לקוח חדש</Button>}
       />
 
       {creating && (
@@ -100,12 +115,27 @@ export function CustomersPage() {
 
       <Card>
         <CardContent className="flex flex-col gap-4 p-4">
-          <Input
-            placeholder="חיפוש לפי שם, טלפון או אימייל..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="max-w-sm"
-          />
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <Input
+              placeholder="חיפוש לפי שם, טלפון או אימייל..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="max-w-sm"
+            />
+            <StatusSelect
+              aria-label="סינון לפי סטטוס אימות"
+              className="sm:w-56"
+              showDot={false}
+              value={verificationFilter}
+              onChange={(next) =>
+                setSearchParams(next === "pending" ? { verification: "pending" } : {}, { replace: true })
+              }
+              options={[
+                { value: "all" as const, label: "כל הלקוחות" },
+                { value: "pending" as const, label: "ממתינים לאימות בלבד" },
+              ]}
+            />
+          </div>
           {isLoading ? (
             <TableSkeleton columns={5} />
           ) : filtered.length === 0 ? (
@@ -184,7 +214,12 @@ export function CustomerForm({ initial, submitting, error, onCancel, onSubmit }:
   return (
     <Card>
       <CardContent className="p-4">
-        <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4">
+        {/* id lets CustomerDetailPage's fixed DetailToolbar submit this form
+            with a `form="customer-form"` button while editing, so "שמור" is
+            reachable without scrolling all the way down here first — same
+            pattern as InspectionHeaderForm's sticky bar (see
+            ResourceCategoryDetailPage) and QuoteForm's "quote-form". */}
+        <form id="customer-form" onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <FormField label="שם מלא" htmlFor="name" error={errors.name?.message}>
               <Input id="name" {...register("name")} />
