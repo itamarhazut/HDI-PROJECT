@@ -4,7 +4,7 @@ import { cn } from "@repo/ui";
 import { strings } from "@repo/shared";
 import { useAuth } from "../auth/AuthProvider";
 import { Logo } from "../components/Logo";
-import { IconLogout, IconSettings } from "../components/icons";
+import { IconLogout, IconMenu, IconSettings, IconX } from "../components/icons";
 import { useAppliedTheme } from "../lib/theme";
 
 export interface NavItem {
@@ -54,6 +54,15 @@ export function AppShell({ navItems }: AppShellProps) {
   // needed here; the hook's own effect does the actual repainting.
   useAppliedTheme();
 
+  // Below the `lg` breakpoint the sidebar is no longer part of the flex
+  // layout (see the <aside> below: `fixed ... lg:static`) — it becomes a
+  // slide-in drawer over the content, opened with the floating menu button
+  // and closed via the backdrop, its own close button, or picking a nav
+  // item. Above `lg` this state is irrelevant: the `lg:translate-x-0` /
+  // `lg:static` classes always win, so the sidebar stays put like before.
+  const [mobileNavOpen, setMobileNavOpen] = React.useState(false);
+  const closeMobileNav = React.useCallback(() => setMobileNavOpen(false), []);
+
   return (
     // Locked to the viewport (not just min-h-screen, which only sets a
     // *floor* — a page taller than the window used to grow the whole
@@ -66,12 +75,50 @@ export function AppShell({ navItems }: AppShellProps) {
     // screen): the shell now always matches the real viewport instead of
     // assuming there's enough height for everything to fit unscrolled.
     <div className="flex h-screen overflow-hidden">
-      <aside className="flex w-64 shrink-0 flex-col bg-sidebar text-sidebar-foreground border-e border-sidebar-border">
-        <div className="flex items-center gap-2.5 px-5 py-5">
+      {/* Dims/blocks the content behind the drawer on phones, and doubles
+          as the "tap outside to close" target. Only ever mounted while the
+          drawer is open, and gone above `lg` (the drawer itself is static
+          there, so there's nothing to dim). */}
+      {mobileNavOpen && (
+        <div
+          className="fixed inset-0 z-30 bg-black/50 lg:hidden"
+          onClick={closeMobileNav}
+          aria-hidden="true"
+        />
+      )}
+
+      <aside
+        className={cn(
+          // Below `lg`: pinned to the viewport (not the flex flow) so it
+          // overlays the page instead of squeezing <main> into a sliver —
+          // that squeeze was the actual mobile bug (the fixed 256px column
+          // simply didn't fit next to real content on a phone-width
+          // screen). `start-0` anchors it to the same edge it already sits
+          // on in the RTL flex layout (the right edge); the translate-x
+          // classes below then slide it off past that edge when closed.
+          "fixed inset-y-0 start-0 z-40 flex w-72 max-w-[85vw] shrink-0 flex-col bg-sidebar text-sidebar-foreground border-e border-sidebar-border shadow-2xl transition-transform duration-200 ease-in-out",
+          // At `lg` and up: back to a normal, always-visible flex column,
+          // exactly like before this file supported mobile at all.
+          "lg:static lg:z-auto lg:w-64 lg:max-w-none lg:translate-x-0 lg:shadow-none",
+          mobileNavOpen ? "translate-x-0" : "translate-x-full"
+        )}
+      >
+        <div className="flex items-center justify-between gap-2.5 px-5 py-5">
           <Logo
             markClassName="h-9 w-9 shrink-0"
             wordmarkClassName="text-xl font-extrabold tracking-tight text-sidebar-foreground"
           />
+          {/* Only reachable on phones — at `lg` the drawer can't be closed
+              (it's not a drawer anymore), so the button would be dead
+              weight there. */}
+          <button
+            type="button"
+            onClick={closeMobileNav}
+            aria-label="סגירת תפריט"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-sidebar-muted-foreground transition-colors hover:bg-black/5 hover:text-sidebar-foreground lg:hidden"
+          >
+            <IconX className="h-5 w-5" />
+          </button>
         </div>
 
         {/* Its own scroll region, independent from <main> — a long nav
@@ -87,6 +134,7 @@ export function AppShell({ navItems }: AppShellProps) {
                 key={item.to}
                 to={item.to}
                 end={item.end}
+                onClick={closeMobileNav}
                 className={({ isActive }) =>
                   cn(
                     "flex items-center gap-3 rounded-lg px-2.5 py-2 text-sm font-medium text-sidebar-muted-foreground transition-colors",
@@ -121,6 +169,7 @@ export function AppShell({ navItems }: AppShellProps) {
             {profile?.role === "admin" && (
               <Link
                 to="/admin/settings"
+                onClick={closeMobileNav}
                 aria-label={strings.nav.settings}
                 className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-sidebar-muted-foreground transition-colors hover:bg-black/5 hover:text-sidebar-foreground"
               >
@@ -137,7 +186,23 @@ export function AppShell({ navItems }: AppShellProps) {
           </button>
         </div>
       </aside>
-      <main className="flex-1 overflow-auto p-6 lg:p-8">
+
+      {/* Floating menu button — the only way to open the drawer on a
+          phone, since the sidebar itself is off-screen by default there.
+          Hidden while the drawer is open (the backdrop/close button/nav
+          picks already cover closing it) and gone entirely at `lg`. */}
+      {!mobileNavOpen && (
+        <button
+          type="button"
+          onClick={() => setMobileNavOpen(true)}
+          aria-label="פתיחת תפריט ניווט"
+          className="fixed bottom-5 start-5 z-30 flex h-12 w-12 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg lg:hidden"
+        >
+          <IconMenu className="h-6 w-6" />
+        </button>
+      )}
+
+      <main className="min-w-0 flex-1 overflow-auto p-4 pb-24 lg:p-8 lg:pb-8">
         <div className="mx-auto max-w-6xl">
           <Outlet />
         </div>

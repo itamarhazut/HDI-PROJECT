@@ -16,10 +16,13 @@ interface DetailToolbarProps {
 // bottom action row, so the whole app lines up the same way.
 //
 // `fixed` positioning is relative to the viewport, so it re-derives the
-// sidebar/column layout by hand: `start-64` clears the 256px sidebar
+// sidebar/column layout by hand: `lg:start-64` clears the 256px sidebar
 // (AppShell's <aside> is w-64) and `end-0` runs to the far edge, then the
 // inner `mx-auto max-w-6xl px-6 lg:px-8` matches AppShell's own content
-// column so the bar lines up with everything else on the page.
+// column so the bar lines up with everything else on the page. Below `lg`
+// the sidebar isn't part of the layout anymore (AppShell turns it into an
+// overlay drawer there — see AppShell.tsx), so the bar starts at the true
+// screen edge (`start-0`) instead of leaving a phantom 256px gap.
 //
 // Since `fixed` elements don't reserve layout space, an identical
 // invisible copy renders first (same markup, `invisible` so it keeps its
@@ -55,8 +58,8 @@ export function DetailToolbar({ children }: DetailToolbarProps) {
       <div className="invisible" aria-hidden="true">
         {bar}
       </div>
-      <div className="fixed start-64 end-0 top-0 z-20">
-        <div className="mx-auto max-w-6xl px-6 py-3 lg:px-8">{bar}</div>
+      <div className="fixed start-0 end-0 top-0 z-20 lg:start-64">
+        <div className="mx-auto max-w-6xl px-4 py-3 lg:px-8">{bar}</div>
       </div>
     </>
   );

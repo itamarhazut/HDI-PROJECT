@@ -264,6 +264,29 @@ export function IconPhone(props: IconProps) {
   );
 }
 
+// Three horizontal bars — the classic "hamburger" menu glyph. Used only
+// below the `lg` breakpoint, to open the sidebar drawer in AppShell once
+// the sidebar itself stops being permanently on-screen (see AppShell.tsx).
+export function IconMenu(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <line x1="4" y1="7" x2="20" y2="7" />
+      <line x1="4" y1="12" x2="20" y2="12" />
+      <line x1="4" y1="17" x2="20" y2="17" />
+    </svg>
+  );
+}
+
+// Simple "X" — closes the mobile sidebar drawer (see AppShell.tsx).
+export function IconX(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <line x1="6" y1="6" x2="18" y2="18" />
+      <line x1="18" y1="6" x2="6" y2="18" />
+    </svg>
+  );
+}
+
 // A calendar with a small filled accent cell in the corner — marks
 // content pulled from the synced phone/Google Calendar (see JobsCalendar
 // and the dashboard's "today" card), echoing the small blue dot used
