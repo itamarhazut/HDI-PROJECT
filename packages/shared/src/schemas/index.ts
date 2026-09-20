@@ -247,3 +247,19 @@ export const signInSchema = z.object({
   password: z.string().min(1, "סיסמה חובה"),
 });
 export type SignInInput = z.infer<typeof signInSchema>;
+
+export const forgotPasswordSchema = z.object({
+  email: z.string().email("אימייל לא תקין"),
+});
+export type ForgotPasswordInput = z.infer<typeof forgotPasswordSchema>;
+
+export const resetPasswordSchema = z
+  .object({
+    password: z.string().min(8, "סיסמה חייבת להכיל לפחות 8 תווים"),
+    confirmPassword: z.string().min(1, "יש לאשר את הסיסמה"),
+  })
+  .refine((data) => data.password === data.confirmPassword, {
+    message: "הסיסמאות אינן תואמות",
+    path: ["confirmPassword"],
+  });
+export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;

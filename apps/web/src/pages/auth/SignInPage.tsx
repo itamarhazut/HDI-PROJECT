@@ -38,7 +38,12 @@ export function SignInPage() {
         {errors.email && <p className="text-sm text-destructive">{errors.email.message}</p>}
       </div>
       <div className="flex flex-col gap-1.5">
-        <Label htmlFor="password">{strings.auth.password}</Label>
+        <div className="flex items-center justify-between">
+          <Label htmlFor="password">{strings.auth.password}</Label>
+          <Link to="/forgot-password" className="text-xs font-medium text-primary hover:underline">
+            {strings.auth.forgotPassword}
+          </Link>
+        </div>
         <Input id="password" type="password" autoComplete="current-password" {...register("password")} />
         {errors.password && <p className="text-sm text-destructive">{errors.password.message}</p>}
       </div>

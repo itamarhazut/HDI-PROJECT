@@ -5,6 +5,8 @@ import { AdminLayout } from "./layouts/AdminLayout";
 import { CustomerLayout } from "./layouts/CustomerLayout";
 import { SignInPage } from "./pages/auth/SignInPage";
 import { SignUpPage } from "./pages/auth/SignUpPage";
+import { ForgotPasswordPage } from "./pages/auth/ForgotPasswordPage";
+import { ResetPasswordPage } from "./pages/auth/ResetPasswordPage";
 import { RoleRedirect } from "./pages/RoleRedirect";
 import { NotFoundPage } from "./pages/NotFoundPage";
 import { QuotePrintPage } from "./pages/QuotePrintPage";
@@ -107,6 +109,8 @@ const router = createHashRouter([
     children: [
       { path: "login", element: <SignInPage /> },
       { path: "signup", element: <SignUpPage /> },
+      { path: "forgot-password", element: <ForgotPasswordPage /> },
+      { path: "reset-password", element: <ResetPasswordPage /> },
     ],
   },
   { path: "*", element: <NotFoundPage /> },

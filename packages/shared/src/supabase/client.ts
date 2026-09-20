@@ -22,6 +22,15 @@ export function createSupabaseClient(env: SupabaseEnv): SupabaseClient<Database>
     auth: {
       persistSession: true,
       autoRefreshToken: true,
+      // Explicit, not the library default: PKCE puts the recovery/verification
+      // token in a real "?code=..." query string, which survives sitting
+      // after this app's hash-router fragment (e.g. "/#/reset-password?code=..."
+      // — react-router-dom's hash router parses that trailing "?code=..." as
+      // its own in-app search params, same as it would on a normal path).
+      // The older "implicit" flow instead appends "#access_token=...&type=
+      // recovery" as a second, competing hash fragment, which collides with
+      // the router's own hash-based routing — see ResetPasswordPage.tsx.
+      flowType: "pkce",
     },
   });
 }
