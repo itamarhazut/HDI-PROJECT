@@ -45,6 +45,28 @@ import { MyDocumentsPage } from "./pages/customer/MyDocumentsPage";
 // shell (apps/desktop) — a plain browser router needs server-side rewrite
 // rules that file:// has no equivalent of, so navigating past the first
 // page load would 404 inside the packaged desktop app.
+
+// Supabase's password-recovery redirect does NOT reliably preserve the
+// "#/reset-password" fragment we pass as redirectTo (see
+// ForgotPasswordPage.tsx) — confirmed in production (2026-09-20): the
+// server-side verify→redirect step lands the browser on the bare origin
+// with the one-time code as a REAL query parameter and no hash path at all
+// (e.g. "https://.../?code=xxx"), which our HashRouter reads as an empty
+// route and — via RequireAuth's unauthenticated redirect — sends the user
+// to "#/login" instead, silently discarding the code. To work around this
+// (rather than depending on Supabase changing that behavior), we check the
+// real, pre-hash query string ourselves, once, before the router is even
+// created, and rewrite the URL into our own hash route so ResetPasswordPage
+// still gets the code via its normal useSearchParams() call.
+if (typeof window !== "undefined") {
+  const topLevelParams = new URLSearchParams(window.location.search);
+  const recoveryCode = topLevelParams.get("code");
+  if (recoveryCode && !window.location.hash.startsWith("#/reset-password")) {
+    const rewrittenUrl = `${window.location.pathname}#/reset-password?code=${encodeURIComponent(recoveryCode)}`;
+    window.history.replaceState(null, "", rewrittenUrl);
+  }
+}
+
 const router = createHashRouter([
   {
     path: "/",
